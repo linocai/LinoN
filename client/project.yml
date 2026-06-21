@@ -1,0 +1,69 @@
+name: LinoN
+options:
+  bundleIdPrefix: top.linotsai
+  deploymentTarget:
+    iOS: "26.0"
+    macOS: "26.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: HX73DFL88G
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_STRICT_CONCURRENCY: minimal
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+
+targets:
+  LinoN:
+    type: application
+    supportedDestinations: [iOS, macOS]
+    deploymentTarget:
+      iOS: "26.0"
+      macOS: "26.0"
+    sources:
+      - path: LinoN
+      - path: DesignTokens.swift
+      - path: Models.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: top.linotsai.linon
+        PRODUCT_NAME: LinoN
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: LinoN/Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: YES
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.finance
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait"
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+
+  LinoNTests:
+    type: bundle.unit-test
+    supportedDestinations: [iOS, macOS]
+    deploymentTarget:
+      iOS: "26.0"
+      macOS: "26.0"
+    sources:
+      - path: LinoNTests
+    dependencies:
+      - target: LinoN
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: top.linotsai.linon.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  LinoN:
+    build:
+      targets:
+        LinoN: all
+        LinoNTests: [test]
+    test:
+      targets:
+        - LinoNTests
+    run:
+      config: Debug

@@ -5,6 +5,9 @@
 backend/.env
 # APNs 私钥(.p8)绝不入库——搬 ECS secret mode 600
 *.p8
+# 客户端本地密钥(API_TOKEN 经 LocalSecrets.plist 打进 bundle 时,绝不入库)
+LocalSecrets.plist
+client/**/LocalSecrets.plist
 
 # —— SQLite 落盘 ——
 *.db

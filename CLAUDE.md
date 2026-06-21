@@ -4,9 +4,10 @@
 
 ## 仓库布局
 
-- monorepo:`backend/`(Python 数据层/部署/冒烟)+ `client/`(SwiftUI 契约,本期仅两个 .swift)+ `archive/`(历史 plan/审查报告)。
+- monorepo:`backend/`(Python 数据层/部署/冒烟)+ `client/`(SwiftUI iOS+macOS App)+ `archive/`(历史 plan/审查报告)。
 - `backend/app/` 子包:`config / data / db / calendar / smoke`。
 - 跑后端:`cd backend && source .venv/bin/activate`。建环境:`bash scripts/setup.sh`(幂等)。冒烟:`python scripts/smoke.py [code]`。测试:`python -m pytest`。
+- 客户端:`client/` 下 `project.yml`(xcodegen 源)+ `LinoN/`(App/Networking/Calendar/Components/Views/Push/Resources)+ `LinoNTests/`+ 根契约 `DesignTokens.swift`/`Models.swift`。**改 project.yml 后必 `xcodegen generate` 重生 `.xcodeproj`**;`.xcodeproj` 入 git(`xcuserdata`/DerivedData 已 ignore)。
 
 ## 钉死的领域常量(单一事实源,禁止各处漂移)
 
@@ -60,6 +61,18 @@
 - **坑2 rsync**:本机 Mac 是 openrsync,与 `--delete` 不兼容;`sync.sh` 已加 GNU-rsync 守卫,需先 `brew install rsync`。
 - **坑3 /opt 权限**:`/opt/linon` 未建,按惯例 `deploy:linon` setgid + 阶段1 建 nologin 系统用户;rsync `-a` 会带错 Mac 目录权限,远端需 chown/chmod 复原(同 lw/lf 旧坑)。
 - **阶段0 不部署**(无服务);阶段1 接 FastAPI + systemd 后才真 rsync。
+
+## 阶段1 track B:SwiftUI 客户端(已落地)
+
+- **工程生成**:xcodegen multiplatform App(单 target,`supportedDestinations: [iOS, macOS]`),Bundle ID `top.linotsai.linon`,deploymentTarget iOS/macOS 26.0。验证双端:`xcodebuild -scheme LinoN -destination 'platform=iOS Simulator,name=LinoJ-iPhone16Pro' build` + `-destination 'platform=macOS' build`(CODE_SIGNING_ALLOWED=NO 免签名)。改 View 必跑 App target build(全局经验)。
+- **iOS ATS 坑(关键)**:iOS 默认禁明文 HTTP,连本机 `http://127.0.0.1:8001` uvicorn 会**静默不发请求**(无报错、UI 空)。已在 `Info.plist` 加 `NSAppTransportSecurity`:`NSAllowsLocalNetworking` + `127.0.0.1` 例外。生产 `ln.linotsai.top` 走 HTTPS 不受影响。
+- **clientProvider 时序坑**:`.onAppear` 晚于子视图 `.task`。后端连接注入务必在 `.task` 里 `model.bind(config:)` **先于** `refresh()`,放 `.onAppear` 会让首拉拿到 nil client。
+- **API_TOKEN 不入源码**:`AppConfig` 解析优先级 UserDefaults(`LN_API_TOKEN`)→ 环境变量 → bundle 内 `LocalSecrets.plist`(已 gitignore)。模拟器注入:`xcrun simctl spawn <dev> defaults write top.linotsai.linon LN_API_TOKEN <tok>`。**卸载 app 会清 UserDefaults**,重装需重写。
+- **签名组件契约 vs 设计**:`Models.swift` 的 `trackX` marker **钳到 98**(`min(98,…)`),设计 README 写 +15%→100% 是近似;组件与单测都对齐契约 98(不改契约)。`stop/take_line` 用 `(buy×ratio×100).rounded()/100`,浮点令 48.30×1.15=55.545→**55.54**(非 55.55),写单测断言注意。
+- **平台分叉**:导航壳 `RootView` 内 `#if os(iOS)`(底部 TabView)/`#if os(macOS)`(240px 玻璃侧栏 + Settings 场景);开/清仓 iOS `.sheet` / macOS 居中 modal overlay;锁屏推送 `PushManager` 整文件 `#if os(iOS)`。**Scene body 内 `#if` 不能跨 WindowGroup + Settings 混写**,要整支 if/else 分两套 Scene。
+- **本地真跑通**:iOS 模拟器(LinoJ-iPhone16Pro,iOS 26.5)启动到 TodayView 渲染 3 持仓 + 触损红卡 + 教练横幅 + 双线/D pips;macOS 侧栏 + KPI 横条 + 卡片渲染;`GET /positions 200`、开/清仓闭环 curl 走通(409 满仓/重复、404 重复清仓、stop_line 派生)。client 17 条单测全绿(formula/calendar/AppModel)。
+- **后端唯一改动**:`GET /positions` 按需拉一拍实时价填 `price`(§4b 联调点,后端供 price 客户端算 pnl);拉价失败不阻塞(price=0,客户端按 buy_price 兜底,pnl=0)。`flow3d` 仍占位(需 Tushare,阶段2)。可注入 `app.api.app._quotes_fn` 免单测联网。
+- **待 track C/真机**:真 APNs 投递、真 device token 注册(模拟器拿不到真 token)、锁屏通知卡 + 动作按钮、macOS 系统通知。`PushManager` 的注册/category/ack 行为已实现,真机才能端到端验。
 
 ## 待联调(token/SSH/真机就绪后)
 

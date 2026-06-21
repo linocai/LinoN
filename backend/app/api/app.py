@@ -191,6 +191,9 @@ def close_position(position_id: int, body: PositionClose):
 @app.get(f"{API_PREFIX}/positions", dependencies=[Depends(require_token)])
 def list_positions() -> PositionsList:
     holdings = store.list_holdings()
+    # §4b 联调点:后端供 price(客户端算 pnl)。按需拉一拍实时价填 price;
+    # flow3d(主力近 3 日净流入)需 Tushare moneyflow,阶段2 接,本期占位。
+    prices = _resolve_prices([h["code"] for h in holdings])
     out = []
     for h in holdings:
         out.append(PositionOut(
@@ -198,7 +201,7 @@ def list_positions() -> PositionsList:
             buy_price=h["buy_price"], qty=h["qty"],
             entry_reason=h["entry_reason"], buy_date=h["buy_date"],
             status=h["status"],
-            price=h.get("price", 0.0) or 0.0,
+            price=prices.get(h["code"], 0.0) or 0.0,
             flow3d=h.get("flow3d", "—") or "—",
         ))
     free = max(0, store.MAX_HOLDINGS - len(out))
@@ -224,6 +227,38 @@ def _resolve_name(code: str) -> str:
         return q.name if q is not None else ""
     except Exception:
         return ""
+
+
+def _resolve_prices(codes: list) -> dict:
+    """按需拉一拍实时价(§4b 联调点:后端供 price)。
+
+    任何源失败/无网络都不阻塞列持仓:返回能拿到的子集,缺的 code 由
+    客户端按 buy_price 兜底(pnl=0)。可注入测试替身见模块级 _quotes_fn。
+    """
+    if not codes:
+        return {}
+    try:
+        quotes = _quotes_fn(list(codes))
+    except Exception:
+        logger.warning("列持仓拉实时价失败,price 缺省 0(客户端兜底)", exc_info=True)
+        return {}
+    out: dict = {}
+    for code, q in (quotes or {}).items():
+        price = getattr(q, "price", None)
+        if price is None and isinstance(q, dict):
+            price = q.get("price")
+        if price:
+            out[code] = float(price)
+    return out
+
+
+def _default_quotes_fn(codes: list) -> dict:
+    from app.data.realtime import get_realtime_quotes
+    return get_realtime_quotes(codes)
+
+
+# 可注入测试替身(避免单测联网)。
+_quotes_fn = _default_quotes_fn
 
 
 def _read_trade_flags(trade_id: int) -> dict:

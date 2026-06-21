@@ -23,6 +23,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(settings_singleton, "API_TOKEN", TEST_TOKEN, raising=False)
     app_mod = importlib.import_module("app.api.app")
     monkeypatch.setattr(app_mod, "ENABLE_MONITOR", False)
+    # 默认不联网:列持仓拉价替身返回空(price 缺省 0)。需真价的测试自行覆盖 _quotes_fn。
+    monkeypatch.setattr(app_mod, "_quotes_fn", lambda codes: {}, raising=False)
     with TestClient(app_mod.app) as c:
         yield c
 
@@ -119,6 +121,43 @@ def test_list_positions_shape(client):
     assert "stop_line" not in h
     for k in ("id", "code", "buy_price", "qty", "entry_reason", "buy_date"):
         assert k in h
+
+
+# —— §4b 联调点:GET /positions 按需拉实时价填 price(客户端算 pnl)——
+def test_list_positions_fills_live_price(client, monkeypatch):
+    import importlib
+    app_mod = importlib.import_module("app.api.app")
+
+    class _Q:
+        def __init__(self, p): self.price = p
+
+    # 注入拉价替身:603986 返回 105.20,缺的 code 不返回(客户端兜底)
+    monkeypatch.setattr(
+        app_mod, "_quotes_fn",
+        lambda codes: {"603986": _Q(105.20)}, raising=False,
+    )
+    client.post("/api/v1/positions/open", json={
+        "code": "603986", "name": "兆易创新", "buy_price": 98.50, "qty": 100, "entry_reason": "突破",
+    }, headers=AUTH)
+    h = client.get("/api/v1/positions", headers=AUTH).json()["holdings"][0]
+    assert h["price"] == pytest.approx(105.20)   # 后端供 price
+
+
+def test_list_positions_price_zero_on_source_failure(client, monkeypatch):
+    """拉价源抛错不阻塞列持仓:price 缺省 0,客户端按 buy_price 兜底。"""
+    import importlib
+    app_mod = importlib.import_module("app.api.app")
+
+    def _boom(codes):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(app_mod, "_quotes_fn", _boom, raising=False)
+    client.post("/api/v1/positions/open", json={
+        "code": "600000", "buy_price": 10.0, "qty": 100, "entry_reason": "x",
+    }, headers=AUTH)
+    r = client.get("/api/v1/positions", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["holdings"][0]["price"] == 0.0
 
 
 # —— A.2 清仓闭环 + 重复清仓 404 ——
