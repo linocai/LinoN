@@ -53,6 +53,24 @@ EOF
   exit 0
 fi
 
+# —— 选定 GNU rsync 3.x(macOS 自带 openrsync 与 --delete 不兼容,见 ~/Lino/hz_info.md)——
+RSYNC_BIN="${RSYNC_BIN:-rsync}"
+if ! "${RSYNC_BIN}" --version 2>/dev/null | head -1 | grep -qE 'rsync +version 3'; then
+  for cand in /opt/homebrew/bin/rsync /usr/local/bin/rsync; do
+    if [ -x "${cand}" ] && "${cand}" --version 2>/dev/null | head -1 | grep -qE 'rsync +version 3'; then
+      RSYNC_BIN="${cand}"; break
+    fi
+  done
+fi
+if ! "${RSYNC_BIN}" --version 2>/dev/null | head -1 | grep -qE 'rsync +version 3'; then
+  cat <<'EOF'
+[sync.sh] 未找到 GNU rsync 3.x。macOS 自带 openrsync 与 --delete 不兼容(见 hz_info.md)。
+  安装:  brew install rsync
+  或指定:RSYNC_BIN=/path/to/gnu-rsync bash scripts/sync.sh
+EOF
+  exit 1
+fi
+
 # —— rsync:只同步 backend/,显式排除 client/(不在 backend 下,双保险)与 data/ ——
 DEST="${USER_NAME}@${HOST}:${REMOTE_PATH}"
 RSYNC_OPTS=(-az --delete
@@ -71,6 +89,6 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   echo "[sync.sh] DRY_RUN:预演,不实传"
 fi
 
-echo "[sync.sh] rsync ${BACKEND_DIR}/  ->  ${DEST}"
-rsync "${RSYNC_OPTS[@]}" "${BACKEND_DIR}/" "${DEST}/"
+echo "[sync.sh] ${RSYNC_BIN} ${BACKEND_DIR}/  ->  ${DEST}"
+"${RSYNC_BIN}" "${RSYNC_OPTS[@]}" "${BACKEND_DIR}/" "${DEST}/"
 echo "[sync.sh] 完成。远端 setup:ssh ${USER_NAME}@${HOST} 'cd ${REMOTE_PATH} && bash scripts/setup.sh'"

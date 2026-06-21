@@ -40,6 +40,15 @@
 - macOS 上 urllib3 报 `NotOpenSSLWarning`(LibreSSL)无害,ECS(OpenSSL)不出现,**勿当 bug 追**。
 - `timeout` 命令 macOS 默认无;脚本验证用 `bash -n` 语法检查。
 
+## 部署 / ECS(hz 杭州云)
+
+- 目标 `deploy@118.178.122.194:/opt/linon`(阿里云 ECS,代号 hz;事实源 `~/Lino/hz_info.md`,**任何 hz 运维动作后必须更新它**)。SSH 仅公钥登录、用户 `deploy`。三要素已填 `backend/.env`(gitignored)。
+- 这台机已跑 lf/lw/主页/xiaoran + nginx + postgres,**内存仅 1.6G + 2G swap,很紧**;阶段1 上 FastAPI 要挑没占的本地端口(已用 8000/8787/5432/80/443)。
+- **坑1 pip 镜像**:ECS 直连公网 PyPI 超时卡死(hz_info 两次重申),`setup.sh` 已默认 `PIP_INDEX_URL=阿里云镜像` + `TIMEOUT=60`,可覆盖。
+- **坑2 rsync**:本机 Mac 是 openrsync,与 `--delete` 不兼容;`sync.sh` 已加 GNU-rsync 守卫,需先 `brew install rsync`。
+- **坑3 /opt 权限**:`/opt/linon` 未建,按惯例 `deploy:linon` setgid + 阶段1 建 nologin 系统用户;rsync `-a` 会带错 Mac 目录权限,远端需 chown/chmod 复原(同 lw/lf 旧坑)。
+- **阶段0 不部署**(无服务);阶段1 接 FastAPI + systemd 后才真 rsync。
+
 ## 待联调(token/SSH/真机就绪后)
 
 - Tushare 有 token 真拉一条 daily/moneyflow(本期只验证无 token 降级)。

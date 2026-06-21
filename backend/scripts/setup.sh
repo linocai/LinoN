@@ -30,6 +30,10 @@ fi
 source "${VENV_DIR}/bin/activate"
 
 # 2) 依赖(钉死版本;升级 pip 后装 requirements)
+# pip 源:ECS 直连公网 PyPI 会超时卡死(见 ~/Lino/hz_info.md),默认走阿里云镜像;可用 PIP_INDEX_URL 覆盖。
+export PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
+export PIP_DEFAULT_TIMEOUT="${PIP_DEFAULT_TIMEOUT:-60}"
+echo "==> pip 源: ${PIP_INDEX_URL}"
 echo "==> 升级 pip"
 python -m pip install --quiet --upgrade pip
 
