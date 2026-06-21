@@ -1,0 +1,32 @@
+# LinoN systemd unit —— 草稿(plan §4 Phase 0.6)。
+# 【本期不启用】:阶段0 不写守护进程/调度器,这里仅留骨架,阶段1 接 FastAPI 脊椎后再 enable/start。
+#
+# 部署占位(阶段1 填实):
+#   · WorkingDirectory / ExecStart 的路径按 sync.sh 的 LINON_DEPLOY_PATH 对齐
+#   · User 改为非 root 专用账户(阶段1 安全收尾)
+#   · ExecStart 指向 venv 内 uvicorn(FastAPI 接口本体阶段1 才有)
+#
+# 启用步骤(阶段1,勿在阶段0 执行):
+#   sudo cp deploy/linon.service /etc/systemd/system/linon.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now linon
+
+[Unit]
+Description=LinoN A-share short-term trading assistant (backend)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# —— 占位,阶段1 按实际部署路径/账户替换 ——
+User=linon
+WorkingDirectory=/opt/linon
+EnvironmentFile=/opt/linon/.env
+# 阶段1:FastAPI 脊椎就绪后启用下行(本期注释,无接口可跑)
+# ExecStart=/opt/linon/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+ExecStart=/usr/bin/true
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

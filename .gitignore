@@ -1,0 +1,40 @@
+# —— 密钥(绝不提交)——
+.env
+*.env
+!.env.example
+backend/.env
+
+# —— SQLite 落盘 ——
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+backend/data/*.db
+data/*.db
+
+# —— Python ——
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# —— venv ——
+.venv/
+venv/
+env/
+backend/.venv/
+backend/venv/
+
+# —— macOS ——
+.DS_Store
+
+# —— Xcode / SwiftPM 产物 ——
+*.xcuserstate
+xcuserdata/
+DerivedData/
+build/
+*.xcworkspace/xcuserdata/
+.swiftpm/
+Package.resolved

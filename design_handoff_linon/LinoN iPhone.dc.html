@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Helvetica Neue",system-ui,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  .lnscroll::-webkit-scrollbar{display:none}
+  .lnscroll{scrollbar-width:none}
+  input{font-family:inherit}
+  @keyframes lnRing{0%,100%{box-shadow:0 0 0 5px rgba(229,68,59,.18)}50%{box-shadow:0 0 0 9px rgba(229,68,59,.05)}}
+  @keyframes lnIn{from{transform:translateY(6px)}to{transform:none}}
+  @keyframes lnSheet{from{transform:translateY(100%)}to{transform:translateY(0)}}
+  @keyframes lnToastP{from{transform:translateY(10px) translateX(-50%)}to{transform:translateY(0) translateX(-50%)}}
+</style>
+</helmet>
+
+<div style="width:max-content;min-width:100%;min-height:100vh;box-sizing:border-box;padding:48px;background:radial-gradient(120% 120% at 0% 0%,#dce7f3 0%,transparent 55%),radial-gradient(120% 120% at 100% 100%,#f1e2ea 0%,transparent 50%),#e9e7e2;display:flex;gap:56px;align-items:flex-start">
+
+  <!-- ============ PHONE 1: INTERACTIVE APP ============ -->
+  <div style="flex:none">
+    <div style="font-size:12.5px;font-weight:650;color:rgba(60,60,67,.62);margin-bottom:14px;padding-left:4px">可交互 · 全流程 <span style="color:rgba(60,60,67,.4);font-weight:500">— 底部玻璃标签栏 · 大标题 · bottom sheet 录入</span></div>
+    <div style="width:414px;height:858px;border-radius:56px;background:linear-gradient(150deg,#2a2a2e,#08080a);padding:11px;box-shadow:0 50px 90px -30px rgba(20,30,60,.5),0 10px 30px rgba(20,30,60,.18),inset 0 0 0 2px rgba(255,255,255,.06);position:relative">
+      <div style="width:392px;height:836px;border-radius:46px;overflow:hidden;position:relative;background:#f3f4f7">
+
+        <!-- status bar -->
+        <div style="position:absolute;top:0;left:0;right:0;height:52px;z-index:25;display:flex;align-items:center;padding:0 30px;pointer-events:none">
+          <span style="font-size:15px;font-weight:680;color:#1d1d1f;letter-spacing:.3px">14:32</span>
+          <span style="margin-left:auto;display:flex;align-items:center;gap:7px">
+            <svg width="18" height="12" viewBox="0 0 18 12" fill="#1d1d1f"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="4.5" y="5" width="3" height="7" rx="1"/><rect x="9" y="2.5" width="3" height="9.5" rx="1"/><rect x="13.5" y="0" width="3" height="12" rx="1" opacity=".35"/></svg>
+            <svg width="16" height="12" viewBox="0 0 16 12" fill="none"><path d="M8 10.5a1.3 1.3 0 100 .01M3.2 6.8a7 7 0 019.6 0M.8 4.3a10.5 10.5 0 0114.4 0" stroke="#1d1d1f" stroke-width="1.4" stroke-linecap="round"/></svg>
+            <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x="1" y="1" width="21" height="11" rx="3" stroke="#1d1d1f" stroke-opacity=".4" stroke-width="1"/><rect x="2.6" y="2.6" width="16" height="7.8" rx="1.6" fill="#1d1d1f"/><rect x="23.2" y="4" width="1.6" height="5" rx=".8" fill="#1d1d1f" fill-opacity=".4"/></svg>
+          </span>
+        </div>
+        <!-- dynamic island -->
+        <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:120px;height:34px;background:#000;border-radius:99px;z-index:30"></div>
+
+        <!-- ===== TODAY ===== -->
+        <sc-if value="{{ isToday }}" hint-placeholder-val="{{ true }}">
+        <div class="lnscroll" style="position:absolute;inset:0;overflow-y:auto;padding:60px 16px 104px">
+          <div style="display:flex;align-items:flex-end;margin:4px 4px 14px">
+            <div>
+              <div style="font-size:30px;font-weight:730;color:#1d1d1f;letter-spacing:-.6px;line-height:1">今日</div>
+              <div style="font-size:13px;color:rgba(60,60,67,.5);margin-top:5px">6 月 20 日 周五 · {{ holdCount }}/3 持仓</div>
+            </div>
+            <div onClick="{{ openEntry }}" style="margin-left:auto;width:38px;height:38px;border-radius:99px;background:rgba(11,107,203,.1);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#0b6bcb" stroke-width="2.2"><path d="M10 4v12M4 10h12" stroke-linecap="round"/></svg></div>
+          </div>
+
+          <!-- summary hero -->
+          <div style="background:#fff;border-radius:20px;border:.5px solid rgba(60,60,67,.08);box-shadow:0 1px 3px rgba(20,30,60,.05);padding:18px 20px;margin-bottom:14px">
+            <div style="font-size:12px;color:rgba(60,60,67,.5);margin-bottom:4px">浮动盈亏</div>
+            <div style="font-size:34px;font-weight:680;font-variant-numeric:tabular-nums;letter-spacing:-1px;line-height:1;color:{{ kpiPnlColor }}">{{ kpiPnl }} <span style="font-size:16px;font-weight:600">{{ kpiPnlPct }}</span></div>
+            <div style="display:flex;gap:10px;margin-top:16px">
+              <div style="flex:1;background:#f7f8fa;border-radius:12px;padding:10px 12px"><div style="font-size:11px;color:rgba(60,60,67,.5)">持仓市值</div><div style="font-size:16px;font-weight:660;color:#1d1d1f;font-variant-numeric:tabular-nums;margin-top:2px">{{ kpiMkt }}</div></div>
+              <div style="flex:1;background:#f7f8fa;border-radius:12px;padding:10px 12px"><div style="font-size:11px;color:rgba(60,60,67,.5)">仓位</div><div style="font-size:16px;font-weight:660;color:#1d1d1f;font-variant-numeric:tabular-nums;margin-top:2px">{{ kpiPos }} <span style="font-size:11px;color:#e8910a;font-weight:600">{{ kpiPosNote }}</span></div></div>
+              <div style="flex:1;background:#f7f8fa;border-radius:12px;padding:10px 12px"><div style="font-size:11px;color:rgba(60,60,67,.5)">纪律</div><div style="font-size:16px;font-weight:660;color:#1d1d1f;font-variant-numeric:tabular-nums;margin-top:2px">{{ rate }}% <span style="font-size:11px;color:#0fa968;font-weight:600">▲{{ rateTrend }}</span></div></div>
+            </div>
+          </div>
+
+          <!-- coach banner -->
+          <sc-if value="{{ hasAlert }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;gap:11px;padding:14px 16px;border-radius:16px;background:linear-gradient(120deg,rgba(229,68,59,.08),rgba(232,145,10,.05));border:.5px solid rgba(229,68,59,.18);margin-bottom:14px;animation:lnIn .4s ease">
+            <div style="width:30px;height:30px;flex:none;border-radius:99px;background:linear-gradient(150deg,#16a06a,#0b6bcb);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px">◆</div>
+            <div style="min-width:0">
+              <div style="font-size:13.5px;line-height:1.5;color:#1d1d1f"><b>{{ alertName }}已触止损线。</b><span style="color:rgba(60,60,67,.7)">铁律是铁律——别再"觉得会反弹"。次日开盘清掉它,我陪你。</span></div>
+              <div onClick="{{ alertClose }}" style="margin-top:10px;display:inline-block;font-size:12.5px;font-weight:650;color:#fff;background:#e5443b;padding:8px 15px;border-radius:10px">标记次日清仓</div>
+            </div>
+          </div>
+          </sc-if>
+
+          <sc-for list="{{ cards }}" as="c" hint-placeholder-count="3">
+          <div style="{{ c.cardStylePhone }}">
+            <sc-if value="{{ c.hitStop }}"><div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:#e5443b"></div></sc-if>
+            <div style="display:flex;align-items:flex-start">
+              <div style="min-width:0">
+                <div style="display:flex;align-items:baseline;gap:7px"><span style="font-size:17px;font-weight:680;color:#1d1d1f">{{ c.name }}</span><span style="font-size:12px;color:rgba(60,60,67,.42);font-variant-numeric:tabular-nums">{{ c.code }}</span></div>
+                <div style="margin-top:8px;display:inline-flex;align-items:center;font-size:11.5px;{{ c.reasonChipStyle }}">{{ c.reasonText }}</div>
+              </div>
+              <div style="margin-left:auto;text-align:right;flex:none">
+                <div style="font-size:25px;font-weight:660;color:#1d1d1f;font-variant-numeric:tabular-nums;letter-spacing:-.5px;line-height:1">{{ c.priceStr }}</div>
+                <div style="margin-top:4px;font-size:13px;font-weight:680;font-variant-numeric:tabular-nums;color:{{ c.pnlColor }}">{{ c.arrow }} {{ c.pnlStr }}</div>
+              </div>
+            </div>
+            <!-- dual-line track -->
+            <div style="position:relative;height:40px;margin-top:18px">
+              <div style="position:absolute;top:18px;left:0;right:0;height:6px;border-radius:99px;background:#edeef1"></div>
+              <div style="{{ c.redZoneStyle }}"></div>
+              <div style="{{ c.fillStyle }}"></div>
+              <div style="position:absolute;top:13px;left:25%;width:1.5px;height:16px;background:rgba(60,60,67,.25)"></div>
+              <div style="{{ c.markerOuter }}"><div style="{{ c.markerDot }}"></div></div>
+              <div style="position:absolute;top:29px;left:0;font-size:10.5px;font-weight:650;color:#e5443b;font-variant-numeric:tabular-nums">止损 {{ c.stopStr }}</div>
+              <div style="position:absolute;top:29px;right:0;font-size:10.5px;font-weight:650;color:#0fa968;font-variant-numeric:tabular-nums">止盈 {{ c.takeStr }}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:14px;margin-top:8px">
+              <span style="font-size:11.5px;color:rgba(60,60,67,.55);white-space:nowrap">距盈 <b style="color:#0fa968;font-variant-numeric:tabular-nums">{{ c.distTakeStr }}</b></span>
+              <span style="font-size:11.5px;color:rgba(60,60,67,.55);white-space:nowrap">距损 <b style="color:rgba(60,60,67,.7);font-variant-numeric:tabular-nums">{{ c.distStopStr }}</b></span>
+              <span style="margin-left:auto;display:flex;align-items:center;gap:5px">
+                <sc-for list="{{ c.pips }}" as="p" hint-placeholder-count="4"><span style="{{ p.st }}"></span></sc-for>
+              </span>
+            </div>
+            <div style="display:flex;align-items:center;margin-top:14px;padding-top:13px;border-top:.5px solid rgba(60,60,67,.09)">
+              <span style="font-size:11.5px;font-weight:600;color:{{ c.dayColor }}">{{ c.dayLabel }}</span>
+              <span style="margin-left:auto;display:flex;gap:8px">
+                <span onClick="{{ c.onCoach }}" style="font-size:12.5px;font-weight:600;color:#0b6bcb;background:rgba(11,107,203,.09);padding:7px 14px;border-radius:9px">问教练</span>
+                <span onClick="{{ c.onClose }}" style="{{ c.closeBtnStylePhone }}">清仓</span>
+              </span>
+            </div>
+          </div>
+          </sc-for>
+          <sc-if value="{{ noHold }}"><div style="text-align:center;padding:50px 0;color:rgba(60,60,67,.4);font-size:13.5px">空仓中 · 去候选挑一只 →</div></sc-if>
+        </div>
+        </sc-if>
+
+        <!-- ===== CANDIDATES ===== -->
+        <sc-if value="{{ isCand }}">
+        <div class="lnscroll" style="position:absolute;inset:0;overflow-y:auto;padding:60px 16px 104px">
+          <div style="margin:4px 4px 14px">
+            <div style="font-size:30px;font-weight:730;color:#1d1d1f;letter-spacing:-.6px;line-height:1">候选</div>
+            <div style="font-size:13px;color:rgba(60,60,67,.5);margin-top:5px">EOD 数据 · 机械排序(放量权重最大)</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 15px;border-radius:14px;background:rgba(11,107,203,.05);border:.5px solid rgba(11,107,203,.16);margin-bottom:14px">
+            <svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke="#0b6bcb" stroke-width="1.7" style="flex:none"><circle cx="9" cy="9" r="6.5"/><path d="M9 8v4M9 6h.01" stroke-linecap="round"/></svg>
+            <div style="font-size:12.5px;line-height:1.45;color:#1d1d1f">{{ candHeadline }}</div>
+          </div>
+          <sc-if value="{{ candEmpty }}">
+            <div style="text-align:center;padding:50px 24px;background:#fff;border-radius:18px;border:.5px solid rgba(60,60,67,.1)">
+              <div style="font-size:32px;margin-bottom:10px">🔒</div>
+              <div style="font-size:15px;font-weight:680;color:#1d1d1f;margin-bottom:6px">满仓 · 候选已闭门</div>
+              <div style="font-size:12.5px;color:rgba(60,60,67,.55);line-height:1.6">3 个仓位已满,注意力交还给持仓。<br>清掉一只腾出仓位后,按"5 × 空仓位"重新打开。</div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ candShown }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <sc-for list="{{ candidates }}" as="c" hint-placeholder-count="5">
+            <div onClick="{{ c.onAnalyze }}" style="display:flex;align-items:center;gap:13px;background:#fff;border-radius:15px;border:.5px solid rgba(60,60,67,.1);box-shadow:0 1px 2px rgba(20,30,60,.04);padding:14px 15px;{{ c.rowBg }}">
+              <div style="width:26px;height:26px;flex:none;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;{{ c.rankChip }}">{{ c.rank }}</div>
+              <div style="min-width:0;flex:1">
+                <div style="font-size:14.5px;font-weight:680;color:#1d1d1f">{{ c.name }} <span style="font-size:11px;color:rgba(60,60,67,.4);font-weight:500">{{ c.code }}</span></div>
+                <sc-if value="{{ c.warn }}"><div style="margin-top:4px;display:inline-flex;font-size:10.5px;font-weight:600;color:#e8910a;background:rgba(232,145,10,.12);padding:2px 8px;border-radius:99px">⚠ {{ c.warn }}</div></sc-if>
+                <sc-if value="{{ c.noWarn }}"><div style="font-size:11.5px;color:rgba(60,60,67,.5);margin-top:3px;display:flex;align-items:center;gap:8px"><span>{{ c.sector }} · {{ c.tag }}</span></div></sc-if>
+                <div style="display:flex;align-items:center;gap:7px;margin-top:7px"><div style="width:54px;height:5px;border-radius:99px;background:#edeef1;overflow:hidden"><div style="{{ c.volBarStyle }}"></div></div><span style="font-size:11px;font-weight:680;font-variant-numeric:tabular-nums;color:{{ c.volColor }}">放量 {{ c.vol }}</span><span style="font-size:11px;color:rgba(60,60,67,.45);font-variant-numeric:tabular-nums">主力 {{ c.flow }}</span></div>
+              </div>
+              <div style="text-align:right;flex:none">
+                <div style="font-size:15px;font-weight:660;color:#1d1d1f;font-variant-numeric:tabular-nums">{{ c.priceStr }}</div>
+                <div style="font-size:12px;font-weight:680;color:#0fa968;font-variant-numeric:tabular-nums">{{ c.chg }}</div>
+                <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="rgba(60,60,67,.3)" stroke-width="2" style="margin-top:4px"><path d="M7 4l5 5-5 5" stroke-linecap="round"/></svg>
+              </div>
+            </div>
+            </sc-for>
+          </div>
+          <div style="text-align:center;font-size:11.5px;color:rgba(60,60,67,.4);margin-top:14px;line-height:1.5">{{ candFootnote }}</div>
+          </sc-if>
+        </div>
+        </sc-if>
+
+        <!-- ===== ANALYSIS / CHAT (full screen) ===== -->
+        <sc-if value="{{ isAnalysis }}">
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;background:#f3f4f7">
+          <!-- nav -->
+          <div style="flex:none;padding:54px 14px 10px;display:flex;align-items:center;gap:10px;background:rgba(243,244,247,.8);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:.5px solid rgba(60,60,67,.1)">
+            <div onClick="{{ backFromChat }}" style="display:flex;align-items:center;color:#0b6bcb;font-size:15px;font-weight:550"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#0b6bcb" stroke-width="2.2"><path d="M12 5l-5 5 5 5" stroke-linecap="round"/></svg></div>
+            <div style="min-width:0">
+              <div style="font-size:15px;font-weight:680;color:#1d1d1f;line-height:1.1">{{ selName }} <span style="font-size:11px;color:rgba(60,60,67,.4);font-weight:500">{{ selCode }}</span></div>
+              <div style="font-size:11px;color:rgba(60,60,67,.5)">{{ selMeta }}</div>
+            </div>
+            <div style="margin-left:auto;text-align:right"><div style="font-size:15px;font-weight:660;color:#1d1d1f;font-variant-numeric:tabular-nums;line-height:1.1">{{ selPrice }}</div><div style="font-size:12px;font-weight:680;font-variant-numeric:tabular-nums;color:{{ selChgColor }}">{{ selChg }}</div></div>
+          </div>
+          <!-- thread -->
+          <div class="lnscroll" style="flex:1;overflow-y:auto;padding:16px 14px 12px">
+            <sc-for list="{{ thread }}" as="m" hint-placeholder-count="2">
+              <sc-if value="{{ m.isUser }}"><div style="display:flex;justify-content:flex-end;margin-bottom:14px;animation:lnIn .3s ease"><div style="max-width:80%;background:#0b6bcb;color:#fff;font-size:13.5px;line-height:1.5;padding:10px 15px;border-radius:18px 18px 5px 18px">{{ m.text }}</div></div></sc-if>
+              <sc-if value="{{ m.isAssistant }}"><div style="display:flex;gap:9px;margin-bottom:14px;animation:lnIn .3s ease"><div style="width:28px;height:28px;flex:none;border-radius:99px;background:linear-gradient(150deg,#16a06a,#0b6bcb);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px">◆</div><div style="background:#fff;border:.5px solid rgba(60,60,67,.1);border-radius:5px 18px 18px 18px;font-size:13.5px;line-height:1.6;color:#1d1d1f;padding:12px 15px">{{ m.text }}</div></div></sc-if>
+              <sc-if value="{{ m.isAnalysis }}">
+                <div style="display:flex;gap:9px;margin-bottom:14px;animation:lnIn .35s ease">
+                  <div style="width:28px;height:28px;flex:none;border-radius:99px;background:linear-gradient(150deg,#16a06a,#0b6bcb);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px">◆</div>
+                  <div style="min-width:0;background:#fff;border:.5px solid rgba(60,60,67,.1);border-radius:5px 18px 18px 18px;box-shadow:0 1px 3px rgba(20,30,60,.06);overflow:hidden">
+                    <div style="padding:13px 15px;border-bottom:.5px solid rgba(60,60,67,.08)">
+                      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:11px;font-weight:700;color:#0b6bcb">①</span><span style="font-size:12px;font-weight:680;color:#1d1d1f">形态面 · 主轴</span><span style="margin-left:auto;font-size:10.5px;font-weight:650;{{ m.fStyle }};padding:2px 8px;border-radius:99px">{{ m.a.form.v }}</span></div>
+                      <div style="font-size:12.5px;line-height:1.55;color:rgba(60,60,67,.78)">{{ m.a.form.txt }}</div>
+                    </div>
+                    <div style="padding:13px 15px;border-bottom:.5px solid rgba(60,60,67,.08)">
+                      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:11px;font-weight:700;color:#0b6bcb">②</span><span style="font-size:12px;font-weight:680;color:#1d1d1f">资金面 · 确认</span><span style="margin-left:auto;font-size:10.5px;font-weight:650;{{ m.uStyle }};padding:2px 8px;border-radius:99px">{{ m.a.fund.v }}</span></div>
+                      <div style="font-size:12.5px;line-height:1.55;color:rgba(60,60,67,.78)">{{ m.a.fund.txt }}</div>
+                    </div>
+                    <div style="padding:13px 15px">
+                      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:11px;font-weight:700;color:#0b6bcb">③</span><span style="font-size:12px;font-weight:680;color:#1d1d1f">消息面 · 排雷</span><span style="margin-left:auto;font-size:10.5px;font-weight:650;{{ m.nStyle }};padding:2px 8px;border-radius:99px">{{ m.a.news.v }}</span></div>
+                      <div style="font-size:12.5px;line-height:1.55;color:rgba(60,60,67,.78)">{{ m.a.news.txt }}</div>
+                    </div>
+                    <div style="padding:13px 15px;background:linear-gradient(120deg,rgba(15,169,104,.07),rgba(11,107,203,.05));border-top:.5px solid rgba(60,60,67,.08)">
+                      <div style="display:inline-block;font-size:12.5px;font-weight:700;{{ m.vStyle }};padding:6px 13px;border-radius:9px;margin-bottom:8px">建议 · {{ m.a.verdict }}</div>
+                      <div style="font-size:12.5px;line-height:1.55;color:#1d1d1f">{{ m.a.plan }}</div>
+                    </div>
+                  </div>
+                </div>
+                <sc-if value="{{ canBuy }}"><div onClick="{{ buyFromChat }}" style="margin:0 0 14px 37px;display:inline-block;font-size:13.5px;font-weight:650;color:#fff;background:#0fa968;padding:11px 20px;border-radius:12px">全仓买入并录入</div></sc-if>
+              </sc-if>
+              <sc-if value="{{ m.isCoach }}">
+                <div style="display:flex;gap:9px;animation:lnIn .35s ease">
+                  <div style="width:28px;height:28px;flex:none;border-radius:99px;background:linear-gradient(150deg,#e5443b,#e8910a);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px">!</div>
+                  <div style="min-width:0">
+                    <div style="background:linear-gradient(135deg,#fff,rgba(255,244,243,.9));border:1px solid rgba(229,68,59,.22);border-radius:5px 18px 18px 18px;box-shadow:0 2px 10px rgba(229,68,59,.08);padding:14px 16px">
+                      <div style="font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#e5443b;margin-bottom:8px">反情绪教练介入</div>
+                      <div style="font-size:13.5px;line-height:1.6;color:#1d1d1f">停一下。"感觉会反弹"——这句话我们听过。<b>{{ selName }}已触 -5% 止损线、明天就是第 4 个交易日</b>,两条铁律同时到期,没有"再拿一天"。</div>
+                      <div style="display:flex;align-items:center;gap:10px;margin-top:11px;padding:10px 12px;border-radius:11px;background:rgba(60,60,67,.04);border:.5px solid rgba(60,60,67,.1)">
+                        <svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke="#e5443b" stroke-width="1.7" style="flex:none"><path d="M9 5.5V9l2.4 1.4"/><circle cx="9" cy="9" r="6.5"/></svg>
+                        <div style="font-size:11.5px;line-height:1.45;color:rgba(60,60,67,.8)"><b style="color:#1d1d1f">复盘 · 5/14</b> 半导体追高硬扛 → <b style="color:#e5443b">亏 4,000</b>。死法和现在一样。</div>
+                      </div>
+                      <div style="font-size:13.5px;line-height:1.6;color:#1d1d1f;margin-top:11px"><b>明早开盘清掉它</b>,把注意力放到对的地方。</div>
+                    </div>
+                    <div onClick="{{ coachConfirmClose }}" style="margin-top:10px;display:inline-block;font-size:13.5px;font-weight:650;color:#fff;background:#e5443b;padding:10px 18px;border-radius:12px">好,标记次日清仓</div>
+                  </div>
+                </div>
+              </sc-if>
+            </sc-for>
+          </div>
+          <!-- composer -->
+          <div style="flex:none;padding:9px 12px 28px;background:rgba(243,244,247,.86);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:.5px solid rgba(60,60,67,.1)">
+            <div style="display:flex;align-items:center;gap:9px;padding:7px 8px 7px 16px;border-radius:22px;background:#fff;border:.5px solid rgba(60,60,67,.14)">
+              <input value="{{ composer }}" onInput="{{ onComposer }}" onKeyDown="{{ onComposerKey }}" placeholder="问教练…" style="flex:1;border:none;background:transparent;outline:none;font-size:14px;color:#1d1d1f" />
+              <div onClick="{{ send }}" style="width:30px;height:30px;flex:none;border-radius:99px;background:#0b6bcb;display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="#fff" stroke-width="2.2"><path d="M9 14V4M5 8l4-4 4 4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ===== REVIEW ===== -->
+        <sc-if value="{{ isReview }}">
+        <div class="lnscroll" style="position:absolute;inset:0;overflow-y:auto;padding:60px 16px 104px">
+          <div style="margin:4px 4px 14px">
+            <div style="font-size:30px;font-weight:730;color:#1d1d1f;letter-spacing:-.6px;line-height:1">复盘</div>
+            <div style="font-size:13px;color:rgba(60,60,67,.5);margin-top:5px">{{ revWeek }}</div>
+          </div>
+          <div style="background:linear-gradient(150deg,#16a06a,#0b6bcb);border-radius:20px;padding:20px;color:#fff;margin-bottom:14px">
+            <div style="display:flex;align-items:flex-end;gap:14px">
+              <div><div style="font-size:11px;font-weight:650;letter-spacing:.5px;text-transform:uppercase;opacity:.85">本周纪律评分</div><div style="font-size:60px;font-weight:700;letter-spacing:-2px;line-height:1">{{ revScore }}</div></div>
+              <div style="margin-left:auto;text-align:right;padding-bottom:6px"><div style="font-size:13px;opacity:.85">纪律执行率</div><div style="font-size:26px;font-weight:680;font-variant-numeric:tabular-nums">{{ rate }}% <span style="font-size:13px">▲{{ rateTrend }}</span></div></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:14px">
+              <div style="flex:1;background:rgba(255,255,255,.16);border-radius:11px;padding:9px 11px"><div style="font-size:17px;font-weight:680;font-variant-numeric:tabular-nums;line-height:1">{{ revTradeCount }}</div><div style="font-size:10.5px;opacity:.85;margin-top:3px">本周交易</div></div>
+              <div style="flex:1;background:rgba(255,255,255,.16);border-radius:11px;padding:9px 11px"><div style="font-size:17px;font-weight:680;font-variant-numeric:tabular-nums;line-height:1">{{ revWin }}</div><div style="font-size:10.5px;opacity:.85;margin-top:3px">盈利笔数</div></div>
+              <div style="flex:1;background:rgba(255,255,255,.16);border-radius:11px;padding:9px 11px"><div style="font-size:17px;font-weight:680;font-variant-numeric:tabular-nums;line-height:1">{{ revRed }}</div><div style="font-size:10.5px;opacity:.85;margin-top:3px">标红笔数</div></div>
+            </div>
+          </div>
+          <div style="background:#fff;border-radius:18px;border:.5px solid rgba(60,60,67,.1);padding:16px 18px;margin-bottom:14px">
+            <div style="font-size:12.5px;font-weight:650;color:rgba(60,60,67,.6);margin-bottom:14px">纪律执行率趋势 · 近 6 周</div>
+            <div style="display:flex;align-items:flex-end;gap:9px;height:120px">
+              <sc-for list="{{ trendBars }}" as="b" hint-placeholder-count="6"><div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end"><span style="font-size:10.5px;font-weight:650;color:rgba(60,60,67,.55);font-variant-numeric:tabular-nums">{{ b.val }}</span><div style="width:100%;border-radius:6px 6px 0 0;{{ b.style }}"></div><span style="font-size:10px;color:rgba(60,60,67,.4)">{{ b.label }}</span></div></sc-for>
+            </div>
+          </div>
+          <div style="font-size:11px;font-weight:680;letter-spacing:.5px;text-transform:uppercase;color:rgba(60,60,67,.4);margin:4px 4px 10px">每笔点评</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <sc-for list="{{ revTrades }}" as="t" hint-placeholder-count="3">
+            <div style="background:#fff;border:.5px solid rgba(60,60,67,.1);border-radius:15px;padding:14px 16px;{{ t.rowBg }}">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:7px">
+                <div style="{{ t.tagStyle }}">{{ t.tagText }}</div>
+                <div style="font-size:14px;font-weight:650;color:#1d1d1f">{{ t.name }} <span style="font-size:11px;color:rgba(60,60,67,.4);font-weight:500">{{ t.code }}</span></div>
+                <div style="margin-left:auto;font-size:15px;font-weight:680;font-variant-numeric:tabular-nums;color:{{ t.pnlColor }}">{{ t.pnl }}</div>
+              </div>
+              <div style="font-size:12.5px;color:rgba(60,60,67,.7);line-height:1.5">{{ t.c }}</div>
+            </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;gap:11px;margin-top:14px;padding:15px 16px;border-radius:16px;background:linear-gradient(120deg,rgba(232,145,10,.07),rgba(11,107,203,.05));border:.5px solid rgba(232,145,10,.2)">
+            <div style="width:28px;height:28px;flex:none;border-radius:99px;background:linear-gradient(150deg,#16a06a,#0b6bcb);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px">◆</div>
+            <div><div style="font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#e8910a;margin-bottom:4px">下周注意 · 已写入交易上下文</div><div style="font-size:13px;line-height:1.6;color:#1d1d1f">{{ revNext }}</div></div>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ===== MEMORY ===== -->
+        <sc-if value="{{ isMem }}">
+        <div class="lnscroll" style="position:absolute;inset:0;overflow-y:auto;padding:60px 16px 104px">
+          <div style="margin:4px 4px 14px">
+            <div style="font-size:30px;font-weight:730;color:#1d1d1f;letter-spacing:-.6px;line-height:1">记忆</div>
+            <div style="font-size:13px;color:rgba(60,60,67,.5);margin-top:5px">历史流水 · 闭环结论 · 长期记忆</div>
+          </div>
+          <div style="font-size:11px;font-weight:680;letter-spacing:.5px;text-transform:uppercase;color:rgba(60,60,67,.4);margin:0 4px 10px">系统记住的结论</div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+            <sc-for list="{{ memory }}" as="m" hint-placeholder-count="3">
+            <div style="background:#fff;border:.5px solid rgba(60,60,67,.1);border-radius:15px;padding:14px 16px">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="{{ m.kindStyle }}">{{ m.kind }}</span><span style="margin-left:auto;font-size:11px;color:rgba(60,60,67,.4)">{{ m.date }}</span></div>
+              <div style="font-size:13px;line-height:1.6;color:rgba(60,60,67,.82)">{{ m.txt }}</div>
+              <div style="margin-top:10px;display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:#0b6bcb"><svg width="13" height="13" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9h10M10 5l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"/></svg>{{ m.foot }}</div>
+            </div>
+            </sc-for>
+          </div>
+          <div style="font-size:11px;font-weight:680;letter-spacing:.5px;text-transform:uppercase;color:rgba(60,60,67,.4);margin:0 4px 10px">历史流水 · 已平仓</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <sc-for list="{{ archived }}" as="a" hint-placeholder-count="3">
+            <div style="background:#fff;border:.5px solid rgba(60,60,67,.1);border-radius:15px;padding:14px 16px">
+              <div style="display:flex;align-items:center;gap:10px">
+                <div style="font-size:14.5px;font-weight:650;color:#1d1d1f">{{ a.name }} <span style="font-size:11px;color:rgba(60,60,67,.4);font-weight:500">{{ a.code }}</span></div>
+                <div style="margin-left:auto;font-size:15px;font-weight:680;font-variant-numeric:tabular-nums;color:{{ a.pnlColor }}">{{ a.pnl }}</div>
+                <div style="font-size:11px;color:rgba(60,60,67,.4);font-variant-numeric:tabular-nums">{{ a.date }}</div>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:9px"><span style="{{ a.kStop }}">止损</span><span style="{{ a.kTake }}">止盈</span><span style="{{ a.kTime }}">时间</span></div>
+              <div style="font-size:12px;color:rgba(60,60,67,.7);line-height:1.45;margin-top:9px">{{ a.note }}</div>
+            </div>
+            </sc-for>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ===== TAB BAR (glass) ===== -->
+        <sc-if value="{{ showTabs }}" hint-placeholder-val="{{ true }}">
+        <div style="position:absolute;left:0;right:0;bottom:0;z-index:28;padding:0 0 8px;background:linear-gradient(180deg,rgba(243,244,247,0),rgba(243,244,247,.92) 55%)">
+          <div style="margin:0 14px;display:flex;align-items:center;justify-content:space-around;height:62px;border-radius:26px;background:rgba(255,255,255,.72);backdrop-filter:blur(34px) saturate(1.7);-webkit-backdrop-filter:blur(34px) saturate(1.7);border:.5px solid rgba(255,255,255,.7);box-shadow:0 8px 28px -8px rgba(20,30,60,.22),inset 0 1px 0 rgba(255,255,255,.7)">
+            <div onClick="{{ goToday }}" style="display:flex;flex-direction:column;align-items:center;gap:3px;color:{{ tabTodayColor }}">
+              <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7.6"/><circle cx="11" cy="11" r="2" fill="currentColor" stroke="none"/></svg>
+              <span style="font-size:10px;font-weight:600">今日</span>
+            </div>
+            <div onClick="{{ goCand }}" style="display:flex;flex-direction:column;align-items:center;gap:3px;color:{{ tabCandColor }}">
+              <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 6.5h10M7 11h10M7 15.5h6.5"/><circle cx="3.6" cy="6.5" r="1" fill="currentColor" stroke="none"/><circle cx="3.6" cy="11" r="1" fill="currentColor" stroke="none"/><circle cx="3.6" cy="15.5" r="1" fill="currentColor" stroke="none"/></svg>
+              <span style="font-size:10px;font-weight:600">候选</span>
+            </div>
+            <div onClick="{{ goReview }}" style="display:flex;flex-direction:column;align-items:center;gap:3px;color:{{ tabReviewColor }}">
+              <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18V9.5M9 18V5M14 18v-6M19 18V8"/></svg>
+              <span style="font-size:10px;font-weight:600">复盘</span>
+            </div>
+            <div onClick="{{ goMem }}" style="display:flex;flex-direction:column;align-items:center;gap:3px;color:{{ tabMemColor }}">
+              <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 4h10a1 1 0 011 1v13l-6-3.2L5 18V5a1 1 0 011-1Z" stroke-linejoin="round"/></svg>
+              <span style="font-size:10px;font-weight:600">记忆</span>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ===== BOTTOM SHEET ===== -->
+        <sc-if value="{{ modalOpen }}">
+        <div style="position:absolute;inset:0;z-index:40;display:flex;flex-direction:column;justify-content:flex-end;background:rgba(20,28,46,.32);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)" onClick="{{ closeModal }}">
+          <div onClick="{{ stop }}" style="background:rgba(252,252,253,.98);backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border-radius:28px 28px 0 0;padding:10px 20px 30px;box-shadow:0 -10px 40px rgba(20,30,60,.2);animation:lnSheet .3s cubic-bezier(.2,.8,.2,1)">
+            <div style="width:38px;height:5px;border-radius:99px;background:rgba(60,60,67,.22);margin:0 auto 16px"></div>
+            <div style="display:flex;align-items:center;margin-bottom:3px"><div style="font-size:19px;font-weight:700;color:#1d1d1f">{{ modalTitle }}</div></div>
+            <div style="font-size:12.5px;color:rgba(60,60,67,.55);margin-bottom:18px">{{ modalSub }}</div>
+
+            <sc-if value="{{ isOpenModal }}">
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;gap:12px">
+                <label style="flex:1"><div style="font-size:11.5px;font-weight:650;color:rgba(60,60,67,.5);margin-bottom:6px">代码</div><input value="{{ form.code }}" onInput="{{ fCode }}" placeholder="603606" style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(60,60,67,.16);background:#fff;font-size:15px;outline:none;color:#1d1d1f;font-variant-numeric:tabular-nums" /></label>
+                <label style="flex:1"><div style="font-size:11.5px;font-weight:650;color:rgba(60,60,67,.5);margin-bottom:6px">名称</div><input value="{{ form.name }}" onInput="{{ fName }}" placeholder="东方电缆" style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(60,60,67,.16);background:#fff;font-size:15px;outline:none;color:#1d1d1f" /></label>
+              </div>
+              <div style="display:flex;gap:12px">
+                <label style="flex:1"><div style="font-size:11.5px;font-weight:650;color:rgba(60,60,67,.5);margin-bottom:6px">买入价</div><input value="{{ form.price }}" onInput="{{ fPrice }}" placeholder="48.30" style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(60,60,67,.16);background:#fff;font-size:15px;outline:none;color:#1d1d1f;font-variant-numeric:tabular-nums" /></label>
+                <label style="flex:1"><div style="font-size:11.5px;font-weight:650;color:rgba(60,60,67,.5);margin-bottom:6px">数量(股)</div><input value="{{ form.qty }}" onInput="{{ fQty }}" placeholder="200" style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(60,60,67,.16);background:#fff;font-size:15px;outline:none;color:#1d1d1f;font-variant-numeric:tabular-nums" /></label>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:11px 14px;border-radius:12px;border:1px dashed rgba(60,60,67,.2);background:rgba(229,68,59,.04)">
+                <svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="#e5443b" stroke-width="1.8" style="flex:none"><path d="M6 9l2 2 4-4"/><circle cx="9" cy="9" r="7"/></svg>
+                <span style="font-size:12px;font-weight:600;color:rgba(60,60,67,.6)">止损线 · 系统派生</span>
+                <span style="margin-left:auto;font-size:15px;font-weight:680;color:#e5443b;font-variant-numeric:tabular-nums">{{ formStopDerived }}</span>
+                <span style="font-size:11px;color:rgba(60,60,67,.45)">×0.95</span>
+              </div>
+              <label><div style="font-size:11.5px;font-weight:650;color:rgba(60,60,67,.5);margin-bottom:6px">进场理由(一句话)</div><input value="{{ form.reason }}" onInput="{{ fReason }}" placeholder="平台突破 · 放量站稳" style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(60,60,67,.16);background:#fff;font-size:15px;outline:none;color:#1d1d1f" /></label>
+            </div>
+            </sc-if>
+
+            <sc-if value="{{ isCloseModal }}">
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;background:rgba(229,68,59,.06);border:.5px solid rgba(229,68,59,.18)">
+                <div style="font-size:16px;font-weight:680;color:#1d1d1f">{{ closeName }} <span style="font-size:12px;color:rgba(60,60,67,.4);font-weight:500">{{ closeCode }}</span></div>
+                <div style="margin-left:auto;font-size:15px;font-weight:680;color:{{ closePnlColor }};font-variant-numeric:tabular-nums">{{ closePnl }}</div>
+              </div>
+              <div style="display:flex;gap:12px">
+                <label style="flex:1"><div style="font-size:11.5px;font-weight:650;color:rgba(60,60,67,.5);margin-bottom:6px">卖出价</div><input value="{{ form.price }}" onInput="{{ fPrice }}" style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(60,60,67,.16);background:#fff;font-size:15px;outline:none;color:#1d1d1f;font-variant-numeric:tabular-nums" /></label>
+                <label style="flex:1"><div style="font-size:11.5px;font-weight:650;color:rgba(60,60,67,.5);margin-bottom:6px">时间</div><input value="次日开盘 09:30" style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(60,60,67,.16);background:#f6f6f8;font-size:14px;outline:none;color:rgba(60,60,67,.6)" /></label>
+              </div>
+              <div style="font-size:12px;color:rgba(60,60,67,.5);line-height:1.5">清仓后停止监控、结算流水并归档到「记忆」。<b>全仓卖出,无减仓/做 T。</b></div>
+            </div>
+            </sc-if>
+
+            <div style="display:flex;gap:10px;margin-top:20px">
+              <div onClick="{{ closeModal }}" style="flex:none;font-size:14.5px;font-weight:600;color:rgba(60,60,67,.7);background:rgba(60,60,67,.08);padding:14px 22px;border-radius:14px">取消</div>
+              <div onClick="{{ modalConfirm }}" style="{{ modalConfirmStylePhone }}">{{ modalConfirmText }}</div>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- toast -->
+        <sc-if value="{{ toast }}">
+        <div style="position:absolute;bottom:96px;left:50%;transform:translateX(-50%);z-index:45;background:rgba(28,32,40,.94);backdrop-filter:blur(20px);color:#fff;font-size:13px;font-weight:550;padding:11px 18px;border-radius:13px;box-shadow:0 12px 30px rgba(0,0,0,.3);display:flex;align-items:center;gap:8px;animation:lnToastP .3s ease;white-space:nowrap">
+          <svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="#28c840" stroke-width="2"><path d="M4 9.5l3.5 3.5L14 6" stroke-linecap="round" stroke-linejoin="round"/></svg>{{ toast }}
+        </div>
+        </sc-if>
+
+        <!-- home indicator -->
+        <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:134px;height:5px;border-radius:99px;background:rgba(0,0,0,.32);z-index:46"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PHONE 2: LOCK-SCREEN HARD-LINE PUSH ============ -->
+  <div style="flex:none">
+    <div style="font-size:12.5px;font-weight:650;color:rgba(60,60,67,.62);margin-bottom:14px;padding-left:4px">硬线推送 · 锁屏 <span style="color:rgba(60,60,67,.4);font-weight:500">— 系统脊椎 · 升级重复至确认 · T+1/涨跌停感知</span></div>
+    <div style="width:414px;height:858px;border-radius:56px;background:linear-gradient(150deg,#2a2a2e,#08080a);padding:11px;box-shadow:0 50px 90px -30px rgba(20,30,60,.5),0 10px 30px rgba(20,30,60,.18),inset 0 0 0 2px rgba(255,255,255,.06);position:relative">
+      <div style="width:392px;height:836px;border-radius:46px;overflow:hidden;position:relative;background:linear-gradient(165deg,#1b2a4a 0%,#33324f 45%,#5a3a4e 100%)">
+        <!-- wallpaper glow -->
+        <div style="position:absolute;top:-60px;right:-40px;width:280px;height:280px;border-radius:99px;background:radial-gradient(circle,rgba(120,150,230,.4),transparent 70%);filter:blur(20px)"></div>
+        <div style="position:absolute;bottom:120px;left:-60px;width:260px;height:260px;border-radius:99px;background:radial-gradient(circle,rgba(220,130,160,.32),transparent 70%);filter:blur(20px)"></div>
+
+        <!-- status bar -->
+        <div style="position:absolute;top:0;left:0;right:0;height:52px;z-index:25;display:flex;align-items:center;padding:0 30px">
+          <span style="font-size:15px;font-weight:680;color:#fff;letter-spacing:.3px">14:32</span>
+          <span style="margin-left:auto;display:flex;align-items:center;gap:7px">
+            <svg width="18" height="12" viewBox="0 0 18 12" fill="#fff"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="4.5" y="5" width="3" height="7" rx="1"/><rect x="9" y="2.5" width="3" height="9.5" rx="1"/><rect x="13.5" y="0" width="3" height="12" rx="1"/></svg>
+            <svg width="16" height="12" viewBox="0 0 16 12" fill="none"><path d="M8 10.5a1.3 1.3 0 100 .01M3.2 6.8a7 7 0 019.6 0M.8 4.3a10.5 10.5 0 0114.4 0" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/></svg>
+            <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x="1" y="1" width="21" height="11" rx="3" stroke="#fff" stroke-opacity=".5" stroke-width="1"/><rect x="2.6" y="2.6" width="16" height="7.8" rx="1.6" fill="#fff"/><rect x="23.2" y="4" width="1.6" height="5" rx=".8" fill="#fff" fill-opacity=".5"/></svg>
+          </span>
+        </div>
+        <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:120px;height:34px;background:#000;border-radius:99px;z-index:30"></div>
+
+        <!-- clock -->
+        <div style="position:absolute;top:64px;left:0;right:0;text-align:center;color:#fff;z-index:20">
+          <div style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:15px;font-weight:500;opacity:.9"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="#fff" stroke-width="1.6"><rect x="3" y="4" width="12" height="11" rx="2"/><path d="M3 7h12M6 2.5v3M12 2.5v3"/></svg>6 月 20 日 周五</div>
+          <div style="font-size:78px;font-weight:580;letter-spacing:-2px;line-height:1.05;margin-top:2px">14:32</div>
+        </div>
+
+        <!-- notifications -->
+        <div style="position:absolute;top:230px;left:14px;right:14px;display:flex;flex-direction:column;gap:11px;z-index:20">
+          <div style="font-size:12px;font-weight:600;color:rgba(255,255,255,.7);padding-left:8px;margin-bottom:1px">通知中心</div>
+
+          <!-- HARD-LINE alert -->
+          <div style="border-radius:22px;overflow:hidden;background:rgba(255,255,255,.16);backdrop-filter:blur(30px) saturate(1.4);-webkit-backdrop-filter:blur(30px) saturate(1.4);border:.5px solid rgba(255,255,255,.28);box-shadow:0 10px 30px -8px rgba(0,0,0,.4)">
+            <div style="height:3px;background:linear-gradient(90deg,#e5443b,#e8910a)"></div>
+            <div style="padding:14px 16px 15px">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                <div style="width:34px;height:34px;flex:none;border-radius:9px;background:linear-gradient(150deg,#16a06a,#0b6bcb);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;box-shadow:0 2px 6px rgba(0,0,0,.2)">L</div>
+                <div style="font-size:13px;font-weight:700;color:#fff;letter-spacing:.2px">LINON · 硬线警报</div>
+                <div style="margin-left:auto;display:flex;align-items:center;gap:6px"><span style="font-size:10px;font-weight:700;color:#fff;background:#e5443b;padding:2px 8px;border-radius:99px">第 2 次升级</span><span style="font-size:11.5px;color:rgba(255,255,255,.7)">现在</span></div>
+              </div>
+              <div style="font-size:15.5px;font-weight:680;color:#fff;line-height:1.4">沪电股份 已触 −5% 止损线</div>
+              <div style="font-size:13.5px;color:rgba(255,255,255,.86);line-height:1.5;margin-top:5px">现价 40.15 · 浮亏 −645 元。明天是第 4 个交易日,价格线 + 时间线两条铁律同时到期。<b style="color:#fff">铁律:次日开盘无条件清仓。</b></div>
+              <div style="display:flex;gap:8px;margin-top:13px">
+                <div style="flex:1;text-align:center;font-size:13.5px;font-weight:680;color:#fff;background:rgba(229,68,59,.92);padding:11px;border-radius:13px">标记次日清仓</div>
+                <div style="flex:none;text-align:center;font-size:13.5px;font-weight:600;color:#fff;background:rgba(255,255,255,.18);padding:11px 18px;border-radius:13px">问教练</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:11px;font-size:11px;color:rgba(255,255,255,.62)"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="9" cy="9" r="6.5"/><path d="M9 5.5V9l2.4 1.4"/></svg>未确认将每 15 分钟升级重复,直到你录动作</div>
+            </div>
+          </div>
+
+          <!-- heartbeat / EOD -->
+          <div style="border-radius:20px;background:rgba(255,255,255,.13);backdrop-filter:blur(30px) saturate(1.4);-webkit-backdrop-filter:blur(30px) saturate(1.4);border:.5px solid rgba(255,255,255,.22);padding:13px 15px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:7px">
+              <div style="width:30px;height:30px;flex:none;border-radius:8px;background:linear-gradient(150deg,#16a06a,#0b6bcb);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px">L</div>
+              <div style="font-size:12.5px;font-weight:650;color:#fff">LINON · 盘后摘要</div>
+              <div style="margin-left:auto;font-size:11.5px;color:rgba(255,255,255,.65)">15:05</div>
+            </div>
+            <div style="font-size:13px;color:rgba(255,255,255,.85);line-height:1.5">今日候选已更新 5 只(东方电缆居首)· 兆易创新 +6.8% 距止盈 +7.7% · 心跳正常 ✓</div>
+          </div>
+        </div>
+
+        <!-- bottom controls -->
+        <div style="position:absolute;bottom:30px;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:0 38px;z-index:20">
+          <div style="width:46px;height:46px;border-radius:99px;background:rgba(255,255,255,.18);backdrop-filter:blur(20px);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 20 20" fill="#fff"><path d="M10 2a4 4 0 00-4 4v3L4 12v1h12v-1l-2-3V6a4 4 0 00-4-4Z"/></svg></div>
+          <div style="width:46px;height:46px;border-radius:99px;background:rgba(255,255,255,.18);backdrop-filter:blur(20px);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="1.7"><circle cx="10" cy="10" r="6"/><path d="M10 7v3l2 1.5"/></svg></div>
+        </div>
+        <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:134px;height:5px;border-radius:99px;background:rgba(255,255,255,.7);z-index:46"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:980,&quot;height&quot;:940}}">
+class Component extends DCLogic {
+  state = {
+    view:'today', modal:null, closeCode:null, selectedCode:null, chatMode:null,
+    thread:[], composer:'', toast:null,
+    form:{code:'',name:'',price:'',qty:'',stop:'',reason:''},
+    holdings:[
+      {id:1,name:'兆易创新',code:'603986',sector:'半导体',cost:98.50,price:105.20,take:113.28,stop:93.58,qty:100,day:2,reason:'平台突破 · 放量站稳',tone:'neutral',flow:'+1.4 亿'},
+      {id:2,name:'沪电股份',code:'002463',sector:'PCB',cost:42.30,price:40.15,take:48.65,stop:40.18,qty:300,day:3,reason:'已触止损 · 按铁律次日清仓',tone:'stop',flow:'-0.6 亿'},
+      {id:3,name:'工业富联',code:'601138',sector:'算力',cost:23.80,price:24.10,take:27.37,stop:22.61,qty:500,day:1,reason:'中间地带 · 主动问教练',tone:'mid',flow:'+0.8 亿'},
+    ],
+    archived:[
+      {name:'晶澳科技',code:'002459',pnl:'+13.2%',pnlNum:1,kept:[1,1,1],note:'吃满趋势,+15% 前主动落袋,样板。',date:'06-12'},
+      {name:'TCL科技',code:'000100',pnl:'-5.0%',pnlNum:-1,kept:[1,0,1],note:'亏钱但严格止损,纪律满分,不标红。',date:'06-09'},
+      {name:'三花智控',code:'002050',pnl:'+2.1%',pnlNum:1,kept:[1,1,1],note:'第 4 日强平,走得坚决。',date:'06-05'},
+      {name:'立讯精密',code:'002475',pnl:'+8.4%',pnlNum:1,kept:[1,1,1],note:'放量突破进场,趋势中持有三日,样板复制。',date:'05-29'},
+      {name:'歌尔股份',code:'002241',pnl:'-9.8%',pnlNum:-1,kept:[0,0,1],note:'追高未守 -5%,硬扛到 D4 才走 —— 标红,典型情绪盘。',date:'05-14'},
+    ],
+    candidates:[
+      {rank:1,name:'东方电缆',code:'603606',sector:'海缆',tag:'低位平台突破',price:48.30,chg:'+4.20%',vol:'2.8x',volPct:92,flow:'+0.9亿',turn:'6.2%',warn:null,
+        a:{form:{v:'强',t:'good',txt:'前期低位横盘 27 个交易日,今日放量 2.8x 突破平台上沿并收盘站稳,属平台突破型,非左侧抄底。'},
+           fund:{v:'确认',t:'good',txt:'主力连续 3 日净流入(+0.6 / +0.7 / +0.9 亿),当日无大幅净流出,小单未爆量。资金确认成立。'},
+           news:{v:'无雷',t:'neutral',txt:'海风板块近 5 日 +8% 有资金承接,非情绪一日游;无监管警告与高位减持,股吧情绪温和未见狂欢。'},
+           verdict:'可进',vt:'good',plan:'不追高:现价距突破上沿仅 +1.8%,可直接进;回踩平台(≈47.4)更稳。止损设平台下沿 45.9(-5%)。扳机在你。'}},
+      {rank:2,name:'紫光国微',code:'002049',sector:'半导体',tag:'主力连续净流入',price:76.50,chg:'+3.10%',vol:'2.1x',volPct:70,flow:'+1.5亿',turn:'5.1%',warn:null,
+        a:{form:{v:'良',t:'good',txt:'突破前高后回踩不破,今日放量 2.1x 再创新高,属趋势中继形态,结构健康。'},
+           fund:{v:'强',t:'good',txt:'主力 5 日净流入 +1.5 亿,候选里资金面最强;当日无净流出。'},
+           news:{v:'无雷',t:'neutral',txt:'半导体题材活跃但未过热,个股无利空公告。'},
+           verdict:'可进',vt:'good',plan:'现价已离突破点 +6%,略追高;建议等分时回踩 75 一线再进,止损 72.7。'}},
+      {rank:3,name:'三安光电',code:'600703',sector:'光电',tag:'底部放量启动',price:15.20,chg:'+2.70%',vol:'1.9x',volPct:60,flow:'+0.7亿',turn:'3.8%',warn:null,
+        a:{form:{v:'中',t:'warn',txt:'底部第一根放量阳线,平台尚未完全确认,处启动初期,右侧信号偏早。'},
+           fund:{v:'一般',t:'neutral',txt:'主力小幅净流入 +0.7 亿,持续性待观察。'},
+           news:{v:'无雷',t:'neutral',txt:'无利空,题材中性。'},
+           verdict:'观望',vt:'warn',plan:'形态未站稳,再等一日:明日若缩量不破今日低点、主力仍在,再进不迟。'}},
+      {rank:4,name:'中航光电',code:'002179',sector:'军工',tag:'',price:41.80,chg:'+1.90%',vol:'1.7x',volPct:52,flow:'+0.5亿',turn:'2.9%',warn:'前期涨幅 +58% · 高位警告降级',
+        a:{form:{v:'弱',t:'bad',txt:'前期累计涨幅 +58%,已进高位警告区,非低位平台,违背"只做低位平台"原则。'},
+           fund:{v:'一般',t:'neutral',txt:'主力净流入一般,无亮点。'},
+           news:{v:'无雷',t:'neutral',txt:'—'},
+           verdict:'不进',vt:'bad',plan:'高位排除规则触发:前期 +50% 以上降级,这只直接放弃,别在山顶接力。'}},
+      {rank:5,name:'鹏鼎控股',code:'002938',sector:'PCB',tag:'站上关键均线',price:33.10,chg:'+1.50%',vol:'1.6x',volPct:46,flow:'+0.4亿',turn:'2.6%',warn:null,
+        a:{form:{v:'中',t:'neutral',txt:'站上 60 日均线,但放量仅 1.6x,突破力度偏弱,持续性存疑。'},
+           fund:{v:'弱',t:'neutral',txt:'主力净流入 +0.4 亿,偏弱。'},
+           news:{v:'无雷',t:'neutral',txt:'—'},
+           verdict:'观望',vt:'warn',plan:'力度不足,排序靠后;若明日放量补足再看,目前不优先。'}},
+    ],
+    memory:[
+      {kind:'闭环结论',date:'06-15 复盘',txt:'追高是你最大的亏损源:近 4 周 3 次破纪律全部发生在 +50% 警告区买入。下周起警告区候选一律跳过。'},
+      {kind:'长期记忆',date:'05-14 教训',txt:'"总觉得会反弹" = 危险信号。出现这句话时 99% 该走。已绑定到反情绪教练触发词。'},
+      {kind:'纪律里程碑',date:'06-12',txt:'连续 8 笔严格执行 -5% 止损,无一硬扛。止损正在成为肌肉记忆。'},
+    ],
+    review:{week:'6 月第 3 周 (06.16–06.20)',score:82,rate:86,rateTrend:4,
+      trend:[{w:'5周',v:68},{w:'4周',v:72},{w:'3周',v:70},{w:'2周',v:78},{w:'上周',v:82},{w:'本周',v:86}],
+      trades:[
+        {name:'晶澳科技',code:'002459',pnl:'+13.2%',tag:'good',c:'进场合规、离场坚决,+15% 前主动落袋。本周样板。'},
+        {name:'TCL科技',code:'000100',pnl:'-5.0%',tag:'good',c:'亏钱但严格止损,纪律满分,不标红。'},
+        {name:'沪电股份',code:'002463',pnl:'-5.1%',tag:'red',c:'追在反弹位、触线后犹豫未即时标记,标红。进场质量需提升。'},
+      ],
+      next:'警告区(前期 +50%)候选一律跳过;触线当日立即标记清仓,不留到次日犹豫。'},
+  };
+
+  pnlOf(h){ return (h.price-h.cost)/h.cost*100; }
+  fmt(n){ return Number(n).toFixed(2); }
+  toastMsg(msg){ this.setState({toast:msg}); clearTimeout(this._t); this._t=setTimeout(()=>this.setState({toast:null}),2400); }
+  pill(t){ const m={good:'color:#0fa968;background:rgba(15,169,104,.1)',warn:'color:#e8910a;background:rgba(232,145,10,.12)',bad:'color:#e5443b;background:rgba(229,68,59,.1)',neutral:'color:rgba(60,60,67,.6);background:rgba(60,60,67,.07)'}; return m[t]||m.neutral; }
+  verdictStyle(t){ const m={good:'color:#0fa968;background:#fff;border:1px solid rgba(15,169,104,.3)',warn:'color:#e8910a;background:#fff;border:1px solid rgba(232,145,10,.35)',bad:'color:#e5443b;background:#fff;border:1px solid rgba(229,68,59,.3)'}; return m[t]||m.warn; }
+  tabColor(active){ return active?'#0b6bcb':'rgba(60,60,67,.45)'; }
+
+  vmHolding(h){
+    const pnl=this.pnlOf(h), gain=pnl>=0, hit=pnl<=-4.9;
+    const mk=Math.max(2,Math.min(98,(pnl+5)/20*100));
+    const mColor=hit?'#e5443b':(gain?'#0fa968':'#e8910a');
+    let fill;
+    if(gain) fill=`position:absolute;top:18px;left:25%;width:${Math.max(0,mk-25)}%;height:6px;background:linear-gradient(90deg,rgba(15,169,104,.18),rgba(15,169,104,.42))`;
+    else fill=`position:absolute;top:18px;left:${mk}%;width:${Math.max(0,25-mk)}%;height:6px;background:linear-gradient(90deg,rgba(229,68,59,.5),rgba(229,68,59,.2))`;
+    const pips=[1,2,3,4].map(i=>{ let st;
+      if(i<h.day) st='width:8px;height:8px;border-radius:99px;background:#1d1d1f';
+      else if(i===h.day) st='width:10px;height:10px;border-radius:99px;border:2px solid '+(hit?'#e5443b':'#0b6bcb')+';background:'+(hit?'rgba(229,68,59,.15)':'rgba(11,107,203,.15)');
+      else if(i===4) st='width:8px;height:8px;border-radius:99px;background:#fff;border:1.5px solid rgba(229,68,59,.5)';
+      else st='width:8px;height:8px;border-radius:99px;background:#dcdee3';
+      return {st}; });
+    let dayLabel,dayColor='rgba(60,60,67,.5)';
+    if(h.day===1) dayLabel='D1 · 今日不可卖(T+1)';
+    else if(h.day===3){ dayLabel='D3 · 明日即强平'; dayColor='#e5443b'; }
+    else if(h.day>=4){ dayLabel='D4 · 今日无条件强平'; dayColor='#e5443b'; }
+    else dayLabel='D'+h.day+' · 第 4 日强平';
+    const toneMap={ neutral:'color:rgba(60,60,67,.6);background:rgba(60,60,67,.05);padding:3px 9px;border-radius:99px',
+      stop:'color:#e5443b;background:rgba(229,68,59,.1);padding:3px 9px;border-radius:99px;font-weight:600',
+      mid:'color:#e8910a;background:rgba(232,145,10,.1);padding:3px 9px;border-radius:99px;font-weight:600' };
+    const reasonText=(h.tone==='stop'?'⚑ ':'')+h.reason;
+    const distTake=(h.take-h.price)/h.price*100, distStop=(h.stop-h.price)/h.price*100;
+    return { ...h,
+      priceStr:this.fmt(h.price), costStr:this.fmt(h.cost), stopStr:this.fmt(h.stop), takeStr:this.fmt(h.take),
+      pnlStr:(gain?'+':'')+pnl.toFixed(2)+'%', pnlColor:gain?'#0fa968':'#e5443b', arrow:gain?'▲':'▼',
+      hitStop:hit, reasonChipStyle:toneMap[h.tone]||toneMap.neutral, reasonText,
+      pips, dayLabel, dayColor,
+      redZoneStyle:'position:absolute;top:18px;left:0;width:25%;height:6px;border-radius:99px 0 0 99px;background:rgba(229,68,59,.15)',
+      fillStyle:fill,
+      markerOuter:`position:absolute;top:9px;left:${mk}%;transform:translateX(-50%)`,
+      markerDot:`width:15px;height:15px;border-radius:99px;background:${mColor};border:3px solid #fff;`+(hit?'animation:lnRing 1.8s ease-in-out infinite':'box-shadow:0 1px 4px rgba(0,0,0,.22)'),
+      cardStylePhone:'position:relative;overflow:hidden;background:#fff;border-radius:18px;padding:16px 18px;margin-bottom:12px;'+(hit?'border:.5px solid rgba(229,68,59,.28);box-shadow:0 2px 12px rgba(229,68,59,.09)':'border:.5px solid rgba(60,60,67,.1);box-shadow:0 1px 3px rgba(20,30,60,.05)'),
+      distTakeStr:(distTake>=0?'+':'')+distTake.toFixed(1)+'%',
+      distStopStr:distStop.toFixed(1)+'%',
+      closeBtnStylePhone:'font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:9px;'+(hit?'color:#fff;background:#e5443b':'color:rgba(60,60,67,.7);background:rgba(60,60,67,.07)'),
+      onClose:()=>this.markClose(h.code), onCoach:()=>this.openCoach(h.code),
+    };
+  }
+
+  vmCand(c){
+    return { ...c,
+      priceStr:this.fmt(c.price),
+      rankChip:c.rank===1?'color:#fff;background:#0b6bcb':'color:rgba(60,60,67,.6);background:rgba(60,60,67,.07)',
+      volBarStyle:`width:${c.volPct}%;height:100%;background:${c.volPct>=80?'#0fa968':'rgba(60,60,67,.45)'}`,
+      volColor:c.volPct>=80?'#0fa968':'rgba(60,60,67,.7)',
+      rowBg:c.warn?'background:rgba(232,145,10,.04)':'', noWarn:!c.warn,
+      onAnalyze:()=>this.openAnalysis(c.code),
+    };
+  }
+
+  openAnalysis(code){ const c=this.state.candidates.find(x=>x.code===code); if(!c)return;
+    this.setState({view:'analysis',selectedCode:code,chatMode:'analyze',
+      thread:[{role:'user',text:`分析一下${c.name},这个位置能不能进?`},{role:'analysis',a:c.a}]}); }
+  openCoach(code){ const h=this.state.holdings.find(x=>x.code===code); if(!h)return;
+    const hit=this.pnlOf(h)<=-4.9;
+    if(hit) this.setState({view:'analysis',selectedCode:code,chatMode:'coach',
+      thread:[{role:'user',text:`${h.name}我想再拿一天,感觉明天会反弹…`},{role:'coach'}]});
+    else this.setState({view:'analysis',selectedCode:code,chatMode:'analyze',
+      thread:[{role:'user',text:`${h.name}现在卡在中间地带,我该拿还是清?`},
+        {role:'assistant',text:'看两点最优先:量能是否萎缩 + 主力资金还在不在。当前主力仍小幅净流入、未破买入逻辑,可继续持有;但距第 4 日仅剩 2 天,一旦缩量滞涨或主力转出,立刻清。扳机在你。'}]}); }
+  backFromChat(){ this.setState({view:this.state.chatMode==='coach'?'today':'candidates'}); }
+  onComposer(e){ this.setState({composer:e.target.value}); }
+  onComposerKey(e){ if(e.key==='Enter') this.send(); }
+  send(){ const t=(this.state.composer||'').trim(); if(!t)return;
+    this.setState(s=>({thread:[...s.thread,{role:'user',text:t},{role:'assistant',text:this.canned(t)}],composer:''})); }
+  canned(t){ return '我先看量能和主力资金:只要缩量企稳、主力没撤,就还在买入逻辑里;真到 -5% 或第 4 日,按铁律走,别跟规则讲价。需要的话我可以拉分时帮你看回撤趋势。'; }
+
+  markClose(code){ const h=this.state.holdings.find(x=>x.code===code); if(!h)return;
+    this.setState({modal:'close',closeCode:code,form:{...this.state.form,price:this.fmt(h.price)}}); }
+  coachConfirmClose(){ this.markClose(this.state.selectedCode); }
+  openEntry(){ this.setState({modal:'open',form:{code:'',name:'',price:'',qty:'',stop:'',reason:''}}); }
+  buyFromChat(){ const c=this.state.candidates.find(x=>x.code===this.state.selectedCode); if(!c)return;
+    this.setState({modal:'open',form:{code:c.code,name:c.name,price:this.fmt(c.price),qty:'',stop:this.fmt(c.price*0.95),reason:c.tag||'平台突破'}}); }
+  closeModal(){ this.setState({modal:null}); }
+  stop(e){ e.stopPropagation(); }
+  fCode(e){ const v=e.target.value; this.setState(s=>({form:{...s.form,code:v}})); }
+  fName(e){ const v=e.target.value; this.setState(s=>({form:{...s.form,name:v}})); }
+  fPrice(e){ const v=e.target.value; this.setState(s=>({form:{...s.form,price:v}})); }
+  fQty(e){ const v=e.target.value; this.setState(s=>({form:{...s.form,qty:v}})); }
+  fReason(e){ const v=e.target.value; this.setState(s=>({form:{...s.form,reason:v}})); }
+
+  confirmClose(){ const code=this.state.closeCode; const h=this.state.holdings.find(x=>x.code===code); if(!h)return;
+    const sell=parseFloat(this.state.form.price)||h.price; const pnl=(sell-h.cost)/h.cost*100;
+    const hit=this.pnlOf(h)<=-4.9;
+    const rec={name:h.name,code:h.code,pnl:(pnl>=0?'+':'')+pnl.toFixed(1)+'%',pnlNum:pnl>=0?1:-1,
+      kept:[hit?1:1, pnl>=15?1:0, h.day>=4?1:1], note:hit?'触线清仓,守住止损铁律。':'按计划清仓。',date:'06-20'};
+    this.setState(s=>({holdings:s.holdings.filter(x=>x.code!==code),archived:[rec,...s.archived],modal:null,view:'today'}));
+    this.toastMsg('已清仓 · 写入流水,监控已停止'); }
+  confirmEntry(){ const f=this.state.form; if(!f.code||!f.price){ this.toastMsg('请填代码和买入价'); return; }
+    const cost=parseFloat(f.price); const stop=cost*0.95;
+    const nh={id:Date.now(),name:f.name||f.code,code:f.code,sector:'—',cost,price:cost,take:cost*1.15,stop,qty:parseInt(f.qty)||100,day:1,reason:f.reason||'手动录入',tone:'neutral',flow:'—'};
+    this.setState(s=>({holdings:[...s.holdings,nh],modal:null,view:'today'}));
+    this.toastMsg('开仓已录入 · 已自动快照形态+资金'); }
+  modalConfirm(){ if(this.state.modal==='open') this.confirmEntry(); else this.confirmClose(); }
+
+  renderVals(){
+    const s=this.state, v=s.view;
+    const cards=s.holdings.map(h=>this.vmHolding(h));
+    const freeSlots=Math.max(0,3-s.holdings.length);
+    const shown=freeSlots>0?s.candidates.slice(0,Math.min(s.candidates.length,5*freeSlots)):[];
+    const candVM=shown.map(c=>this.vmCand(c));
+    const alert=cards.find(c=>c.hitStop);
+    const thread=s.thread.map(m=>{ const o={...m,isUser:m.role==='user',isAssistant:m.role==='assistant',isCoach:m.role==='coach',isAnalysis:m.role==='analysis'};
+      if(o.isAnalysis){ o.fStyle=this.pill(m.a.form.t); o.uStyle=this.pill(m.a.fund.t); o.nStyle=this.pill(m.a.news.t); o.vStyle=this.verdictStyle(m.a.vt); }
+      return o; });
+    let sel=s.candidates.find(x=>x.code===s.selectedCode)||s.holdings.find(x=>x.code===s.selectedCode);
+    const selIsCand=!!s.candidates.find(x=>x.code===s.selectedCode);
+    let selPrice='',selChg='',selChgColor='#0fa968',selMeta='';
+    if(sel){ selPrice=this.fmt(sel.price);
+      if(selIsCand){ selChg=sel.chg; selMeta='放量 '+sel.vol+' · 主力 '+sel.flow; }
+      else { const p=this.pnlOf(sel); selChg=(p>=0?'+':'')+p.toFixed(2)+'%'; selChgColor=p>=0?'#0fa968':'#e5443b'; selMeta='成本 '+this.fmt(sel.cost)+' · D'+sel.day; } }
+    const canBuy=s.chatMode==='analyze'&&selIsCand&&sel&&sel.a&&sel.a.verdict==='可进';
+    const mkt=s.holdings.reduce((a,h)=>a+h.price*h.qty,0);
+    const pcost=s.holdings.reduce((a,h)=>a+h.cost*h.qty,0);
+    const upnl=mkt-pcost; const upct=pcost?upnl/pcost*100:0;
+    const R=s.review;
+    const vs=R.trend.map(t=>t.v); const lo=Math.min(...vs)-7, hi=Math.max(...vs)+2; const rng=Math.max(1,hi-lo);
+    const trendBars=R.trend.map((t,i)=>{ const last=i===R.trend.length-1; const hpct=Math.round((t.v-lo)/rng*100);
+      return {style:`height:${hpct}%;background:${last?'linear-gradient(180deg,#16a06a,#0b6bcb)':'rgba(60,60,67,.2)'}`,label:t.w,val:t.v}; });
+    const revTrades=R.trades.map(t=>({...t, pnlColor:t.pnl.indexOf('-')>=0?'#e5443b':'#0fa968',
+      rowBg:t.tag==='red'?'background:rgba(229,68,59,.04)':'',
+      tagStyle:t.tag==='red'?'font-size:10.5px;font-weight:700;color:#e5443b;background:rgba(229,68,59,.1);padding:3px 9px;border-radius:99px':'font-size:10.5px;font-weight:700;color:#0fa968;background:rgba(15,169,104,.1);padding:3px 9px;border-radius:99px',
+      tagText:t.tag==='red'?'标红':'肯定'}));
+    const kindStyle=(k)=>{ if(k==='闭环结论')return 'font-size:10.5px;font-weight:700;color:#0b6bcb;background:rgba(11,107,203,.1);padding:3px 9px;border-radius:99px';
+      if(k==='长期记忆')return 'font-size:10.5px;font-weight:700;color:#e8910a;background:rgba(232,145,10,.12);padding:3px 9px;border-radius:99px';
+      return 'font-size:10.5px;font-weight:700;color:#0fa968;background:rgba(15,169,104,.1);padding:3px 9px;border-radius:99px'; };
+    const memFoot={'闭环结论':'已写入下周交易上下文','长期记忆':'已绑定反情绪教练触发词','纪律里程碑':'持续追踪 · 接近习惯化'};
+    const memory=s.memory.map(m=>({...m,kindStyle:kindStyle(m.kind),foot:memFoot[m.kind]||'已记录'}));
+    const kbadge=(on)=>on?'font-size:10.5px;font-weight:600;color:#0fa968;background:rgba(15,169,104,.1);padding:2px 8px;border-radius:99px':'font-size:10.5px;font-weight:600;color:#e5443b;background:rgba(229,68,59,.08);padding:2px 8px;border-radius:99px;text-decoration:line-through';
+    const archived=s.archived.map(a=>({...a,pnlColor:a.pnlNum>=0?'#0fa968':'#e5443b',kStop:kbadge(a.kept[0]),kTake:kbadge(a.kept[1]),kTime:kbadge(a.kept[2])}));
+    let closeName='',closeCode='',closePnl='',closePnlColor='#0fa968';
+    const ch=s.holdings.find(x=>x.code===s.closeCode);
+    if(ch){ closeName=ch.name; closeCode=ch.code; const sell=parseFloat(s.form.price)||ch.price; const p=(sell-ch.cost)/ch.cost*100; closePnl=(p>=0?'+':'')+p.toFixed(2)+'%'; closePnlColor=p>=0?'#0fa968':'#e5443b'; }
+    const isOpen=s.modal==='open', isClose=s.modal==='close';
+
+    return {
+      isToday:v==='today', isCand:v==='candidates', isReview:v==='review', isMem:v==='memory', isAnalysis:v==='analysis',
+      showTabs:v!=='analysis',
+      goToday:()=>this.setState({view:'today'}), goCand:()=>this.setState({view:'candidates'}),
+      goReview:()=>this.setState({view:'review'}), goMem:()=>this.setState({view:'memory'}),
+      tabTodayColor:this.tabColor(v==='today'), tabCandColor:this.tabColor(v==='candidates'),
+      tabReviewColor:this.tabColor(v==='review'), tabMemColor:this.tabColor(v==='memory'),
+      holdCount:s.holdings.length, rate:R.rate,
+      cards, hasAlert:!!alert, alertName:alert?alert.name:'', alertClose:()=>{ if(alert)this.markClose(alert.code); },
+      openEntry:()=>this.openEntry(), noHold:s.holdings.length===0,
+      kpiMkt:'¥'+Math.round(mkt).toLocaleString('en-US'),
+      kpiPnl:(upnl>=0?'+¥':'−¥')+Math.abs(Math.round(upnl)).toLocaleString('en-US'),
+      kpiPnlPct:(upct>=0?'+':'')+upct.toFixed(2)+'%', kpiPnlColor:upnl>=0?'#0fa968':'#e5443b',
+      kpiPos:s.holdings.length+'/3', kpiPosNote:s.holdings.length>=3?'满仓':(3-s.holdings.length)+' 可用', rateTrend:R.rateTrend,
+      candidates:candVM, candEmpty:freeSlots===0, candShown:candVM.length>0,
+      candHeadline:freeSlots===0?'满仓 · 候选闭门':`今日 18 只合格候选 · 空 ${freeSlots} 仓位 → 截断取前 ${candVM.length}`,
+      candFootnote:`截断线以下 ${18-candVM.length} 只合格但不在注意力范围内 · 满仓时此列表为空`,
+      thread, selName:sel?sel.name:'', selCode:sel?sel.code:'', selPrice, selChg, selChgColor, selMeta,
+      canBuy, buyFromChat:()=>this.buyFromChat(), coachConfirmClose:()=>this.coachConfirmClose(),
+      backFromChat:()=>this.backFromChat(), composer:s.composer, onComposer:(e)=>this.onComposer(e), onComposerKey:(e)=>this.onComposerKey(e), send:()=>this.send(),
+      revWeek:R.week, revScore:R.score, trendBars, revTrades, revNext:R.next,
+      revTradeCount:R.trades.length, revWin:R.trades.filter(t=>t.pnl.indexOf('-')<0).length, revRed:R.trades.filter(t=>t.tag==='red').length,
+      formStopDerived:s.form.price?'¥'+(parseFloat(s.form.price)*0.95).toFixed(2):'待填买入价',
+      memory, archived,
+      modalOpen:!!s.modal, isOpenModal:isOpen, isCloseModal:isClose,
+      modalTitle:isOpen?'开仓录入':'清仓录入', modalSub:isOpen?'全仓买入 · 录入即建仓并快照':'全仓卖出 · 结算并归档',
+      closeName, closeCode, closePnl, closePnlColor,
+      closeModal:()=>this.closeModal(), stop:(e)=>this.stop(e), modalConfirm:()=>this.modalConfirm(),
+      modalConfirmText:isOpen?'确认开仓':'确认清仓',
+      modalConfirmStylePhone:'flex:1;text-align:center;font-size:14.5px;font-weight:680;color:#fff;padding:14px;border-radius:14px;'+(isOpen?'background:#0fa968':'background:#e5443b'),
+      form:s.form, fCode:(e)=>this.fCode(e), fName:(e)=>this.fName(e), fPrice:(e)=>this.fPrice(e), fQty:(e)=>this.fQty(e), fReason:(e)=>this.fReason(e),
+      toast:s.toast,
+    };
+  }
+}
+</script>
+</body>
+</html>

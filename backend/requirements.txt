@@ -1,0 +1,21 @@
+# LinoN 后端依赖 —— 钉死版本(plan §2 约束4:venv + 锁版本)。
+# 兼容 Python 3.9+(开发机为 3.9.6;ECS Python 版本待定,这些版本 3.9~3.12 通吃)。
+# 升级前先在 ECS 上 setup.sh 重建 venv 验证,勿在生产直接 pip install -U。
+
+# —— 配置:pydantic-settings 读 .env(plan 锁定)——
+pydantic==2.10.6
+pydantic-settings==2.7.1
+
+# —— 历史/资金/日历:Tushare 2000 积分会员(plan 锁定)——
+tushare==1.4.21
+
+# tushare 运行依赖(pandas 处理 DataFrame;2.2.3 是支持 Py3.9 的末版)
+pandas==2.2.3
+requests==2.32.3
+
+# —— 阶段 1 起的 FastAPI 脊椎(本期不写接口本体,先钉版本备料)——
+fastapi==0.115.6
+uvicorn==0.34.0
+
+# —— 测试 ——
+pytest==8.3.4
