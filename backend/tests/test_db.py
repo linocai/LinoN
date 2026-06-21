@@ -34,8 +34,9 @@ def _tables(db_path):
     return sorted(r[0] for r in rows)
 
 
-def test_init_creates_four_tables(db):
-    assert _tables(db) == ["memory", "positions", "reviews", "trades"]
+def test_init_creates_tables(db):
+    # 阶段0 四表 + 阶段1 A.1 新增 device_tokens
+    assert _tables(db) == ["device_tokens", "memory", "positions", "reviews", "trades"]
 
 
 def test_positions_has_no_stop_line_column(db):

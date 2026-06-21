@@ -33,6 +33,17 @@ try:
         DEEPSEEK_API_KEY: Optional[str] = None
         DB_PATH: str = _DEFAULT_DB_PATH
 
+        # —— 阶段1 track A:API 鉴权(单用户共享密钥)——
+        API_TOKEN: Optional[str] = None
+
+        # —— 阶段1 track A:APNs token-based 推送 ——
+        APNS_KEY_ID: Optional[str] = None
+        APNS_TEAM_ID: Optional[str] = None
+        APNS_BUNDLE_ID: Optional[str] = None
+        APNS_KEY_PATH: Optional[str] = None        # .p8 私钥文件路径(secret,不入 git)
+        APNS_USE_SANDBOX: bool = True              # dev 直装走 sandbox 网关
+        ESCALATE_INTERVAL_MIN: int = 15            # 硬线未 ack 的升级重复间隔(分钟)
+
         model_config = SettingsConfigDict(
             env_file=str(_ENV_FILE),
             env_file_encoding="utf-8",
@@ -47,6 +58,18 @@ try:
         @property
         def has_deepseek_key(self) -> bool:
             return bool(self.DEEPSEEK_API_KEY and self.DEEPSEEK_API_KEY.strip())
+
+        @property
+        def has_api_token(self) -> bool:
+            return bool(self.API_TOKEN and self.API_TOKEN.strip())
+
+        @property
+        def has_apns_config(self) -> bool:
+            """APNs 凭证齐全(KeyID/TeamID/BundleID/.p8 路径都在)才能真推。"""
+            return bool(
+                self.APNS_KEY_ID and self.APNS_TEAM_ID
+                and self.APNS_BUNDLE_ID and self.APNS_KEY_PATH
+            )
 
     _BACKEND = "pydantic-settings"
 
@@ -80,9 +103,29 @@ except ImportError:  # pragma: no cover - 仅在依赖未装时走到
                     return file_vals[key]
                 return default
 
+            def pick_bool(key: str, default: bool) -> bool:
+                raw = pick(key, None)
+                if raw is None:
+                    return default
+                return raw.strip().lower() in ("1", "true", "yes", "on")
+
+            def pick_int(key: str, default: int) -> int:
+                raw = pick(key, None)
+                try:
+                    return int(raw) if raw is not None else default
+                except (ValueError, TypeError):
+                    return default
+
             self.TUSHARE_TOKEN: Optional[str] = pick("TUSHARE_TOKEN", None)
             self.DEEPSEEK_API_KEY: Optional[str] = pick("DEEPSEEK_API_KEY", None)
             self.DB_PATH: str = pick("DB_PATH", _DEFAULT_DB_PATH) or _DEFAULT_DB_PATH
+            self.API_TOKEN: Optional[str] = pick("API_TOKEN", None)
+            self.APNS_KEY_ID: Optional[str] = pick("APNS_KEY_ID", None)
+            self.APNS_TEAM_ID: Optional[str] = pick("APNS_TEAM_ID", None)
+            self.APNS_BUNDLE_ID: Optional[str] = pick("APNS_BUNDLE_ID", None)
+            self.APNS_KEY_PATH: Optional[str] = pick("APNS_KEY_PATH", None)
+            self.APNS_USE_SANDBOX: bool = pick_bool("APNS_USE_SANDBOX", True)
+            self.ESCALATE_INTERVAL_MIN: int = pick_int("ESCALATE_INTERVAL_MIN", 15)
 
         @property
         def has_tushare_token(self) -> bool:
@@ -91,6 +134,17 @@ except ImportError:  # pragma: no cover - 仅在依赖未装时走到
         @property
         def has_deepseek_key(self) -> bool:
             return bool(self.DEEPSEEK_API_KEY and self.DEEPSEEK_API_KEY.strip())
+
+        @property
+        def has_api_token(self) -> bool:
+            return bool(self.API_TOKEN and self.API_TOKEN.strip())
+
+        @property
+        def has_apns_config(self) -> bool:
+            return bool(
+                self.APNS_KEY_ID and self.APNS_TEAM_ID
+                and self.APNS_BUNDLE_ID and self.APNS_KEY_PATH
+            )
 
     _BACKEND = "stdlib-fallback"
 

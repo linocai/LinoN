@@ -16,6 +16,18 @@
 - 持仓交易日计数:**买入日=D1**,`count==4 ⟺ should_force_close`(D4 强平,可卖 D2/D3)。改这个语义=改契约,必须回 planner。
 - 绿涨红跌(用户明确选择,与 A 股本地相反),**勿"纠正"**。
 
+## 阶段1 track A:FastAPI 脊椎(已落地)
+
+- **单 unit 架构**:监控是 app 内后台 asyncio 任务(`app/monitor/loop.py:monitor_loop`),由 `app/api/app.py` 的 `lifespan` 起停,**不另起进程**。测试时设 `app.api.app.ENABLE_MONITOR=False` 关后台轮询,免干扰。
+- **代码分层**:`app/api`(app/deps/schemas)、`app/monitor`(hardline 纯判定 / escalation 升级状态机 / eod 摘要 / loop 轮询)、`app/push`(apns)。**硬线判定、EOD、升级全是纯函数/可注入**,单测不联网不真推。
+- **规则常量唯一源**:`-5.0/+15.0/D4/容差带` 只在 `app/db/store.py` 顶部;`hardline.py`/`eod.py` 从 store import,**禁止再写一份**。
+- **鉴权**:`require_token` 比对 `.env` `API_TOKEN`(Bearer,`hmac.compare_digest`);startup `require_api_token_ready()` fail-fast `len≥16`。本地测试 token 已写 `backend/.env`(64 字符,gitignored)。
+- **buy_date 派生**:`open` 的 buy_date = 当前交易日(今天非交易日→`prev_trading_day`);周末/节假日录入会落到上一交易日(预期行为,非 bug)。
+- **APNs JWT**:token-based(ES256),`build_jwt(key_pem,...)` 收 PEM 串,**单测用临时 EC P-256 key**(`cryptography.ec.generate_private_key(SECP256R1())`),不依赖真 `.p8`。`send_push(transport=...)` 注入假 transport 即不真连 Apple。`has_apns_config` 仅查四要素齐不齐;`.p8` 路径不存在时 `get_jwt()` 优雅返回 None。
+- **依赖**:`PyJWT==2.9.0`/`cryptography==44.0.0`/`httpx[http2]==0.27.2`(钉死,兼容 3.9);`httpx` 也是 FastAPI `TestClient` 的依赖。装库走阿里云镜像(`PIP_INDEX_URL`)。
+- **冒烟**:`bash scripts/smoke_api.sh`(起 uvicorn → curl 全闭环);需 `.env` 有 `API_TOKEN`。**真 APNs 实推/ECS/真机留 track C/B**(无设备 token,A.4 只到单测)。
+- **pydantic v2 settings 可 monkeypatch**:测试里 `monkeypatch.setattr(settings, "API_TOKEN", x, raising=False)` 可行(模型非 frozen);上文"不能 setattr"指的是无 monkeypatch 的裸赋值场景。
+
 ## 数据源坑(已验证)
 
 - 新浪 `hq.sinajs.cn`:**必须带 `Referer: https://finance.sina.com.cn`**,否则返回 `Kinsoku jikou desu!` 无数据。GBK 解码。字段:volume=**股**(÷100→手)、amount=**元**;bid/ask 块「量先价后」。

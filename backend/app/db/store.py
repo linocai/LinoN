@@ -9,9 +9,11 @@
   reviews(id, week, score, red_flags(JSON), discipline_rate, lessons,
           next_week_note, created_at)
   memory(id, kind, content, created_at)
+  device_tokens(id, token UNIQUE, platform, created_at)   -- 阶段1 A.1 设备注册
 
 CRUD 最小集:open_position / close_position(落 trades + 归档 position) /
-            list_holdings / insert_review / insert_memory。
+            list_holdings / get_holding / insert_review / insert_memory /
+            upsert_device_token / list_device_tokens(阶段1 A.1 推送遍历)。
 
 注:plan DDL 是后端 schema 权威。客户端 Models.swift 上 TradeRecord 多了 name/note 字段
    (展示用),不在后端 0.4 DDL 内——本期严格照 plan DDL 建表,name/note 留待阶段3 复盘细化时
@@ -86,6 +88,13 @@ CREATE TABLE IF NOT EXISTS memory (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     kind       TEXT    NOT NULL,              -- 闭环结论/长期记忆/纪律里程碑
     content    TEXT    NOT NULL,
+    created_at TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS device_tokens (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    token      TEXT    NOT NULL UNIQUE,       -- APNs device token(客户端上报)
+    platform   TEXT    NOT NULL DEFAULT 'ios',
     created_at TEXT    NOT NULL
 );
 """
@@ -192,6 +201,54 @@ def list_holdings(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
         d["take_line"] = take_line(d["buy_price"])     # 派生
         out.append(d)
     return out
+
+
+def get_holding_by_code(code: str, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """按 code 取在持仓(status='holding')。无则 None。用于 open 重复防护。"""
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM positions WHERE code = ? AND status = 'holding'",
+            (code,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    d = dict(row)
+    if d.get("entry_snapshot"):
+        try:
+            d["entry_snapshot"] = json.loads(d["entry_snapshot"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    d["stop_line"] = stop_line(d["buy_price"])
+    d["take_line"] = take_line(d["buy_price"])
+    return d
+
+
+def get_position(position_id: int, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """按 id 取任一持仓行(任何 status)。无则 None。"""
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM positions WHERE id = ?", (position_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row is not None else None
+
+
+def holding_count(db_path: Optional[str] = None) -> int:
+    """当前在持仓票数。"""
+    conn = get_connection(db_path)
+    try:
+        return int(
+            conn.execute(
+                "SELECT COUNT(*) AS n FROM positions WHERE status = 'holding'"
+            ).fetchone()["n"]
+        )
+    finally:
+        conn.close()
 
 
 def _compute_kept_flags(
@@ -322,3 +379,41 @@ def insert_memory(kind: str, content: str, db_path: Optional[str] = None) -> int
         return int(cur.lastrowid)
     finally:
         conn.close()
+
+
+# —— 设备 token(阶段1 A.1:APNs device token 注册;推送时遍历)——————————
+
+def upsert_device_token(
+    token: str, platform: str = "ios", db_path: Optional[str] = None
+) -> int:
+    """登记一个 APNs device token。token UNIQUE,重复上报 upsert 不增行、不报错。
+
+    返回该 token 行的 id。
+    """
+    conn = get_connection(db_path)
+    try:
+        cur = conn.execute(
+            """INSERT INTO device_tokens (token, platform, created_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(token) DO UPDATE SET platform = excluded.platform""",
+            (token, platform, _now()),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id FROM device_tokens WHERE token = ?", (token,)
+        ).fetchone()
+        return int(row["id"]) if row else int(cur.lastrowid)
+    finally:
+        conn.close()
+
+
+def list_device_tokens(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """列出所有已注册设备 token(推送时遍历)。"""
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT id, token, platform, created_at FROM device_tokens ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]

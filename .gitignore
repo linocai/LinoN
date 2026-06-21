@@ -3,6 +3,8 @@
 *.env
 !.env.example
 backend/.env
+# APNs 私钥(.p8)绝不入库——搬 ECS secret mode 600
+*.p8
 
 # —— SQLite 落盘 ——
 *.db

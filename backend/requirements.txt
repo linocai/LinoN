@@ -13,9 +13,16 @@ tushare==1.4.21
 pandas==2.2.3
 requests==2.32.3
 
-# —— 阶段 1 起的 FastAPI 脊椎(本期不写接口本体,先钉版本备料)——
+# —— 阶段 1 FastAPI 脊椎 ——
 fastapi==0.115.6
 uvicorn==0.34.0
 
-# —— 测试 ——
+# —— 阶段 1 APNs 直连(token-based JWT ES256 + HTTP/2 推送)——
+# PyJWT 做 ES256 JWT 签名;cryptography 提供 EC 后端;httpx[http2] 走 APNs HTTP/2 网关。
+# 版本兼容 Python 3.9(开发机 3.9.6;ECS 3.9~3.12 通吃)。
+PyJWT==2.9.0
+cryptography==44.0.0
+httpx[http2]==0.27.2
+
+# —— 测试(TestClient 依赖 httpx,已在上方钉版本)——
 pytest==8.3.4
