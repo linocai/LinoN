@@ -81,6 +81,10 @@ final class AppModel {
     private var clientProvider: () -> APIClient?
     /// iOS 通知动作回报(标记次日清仓 / 问教练 → ack)的钩子,由 PushManager 注册。
     var onAlertAction: ((_ code: String, _ action: String) -> Void)? = nil
+    #if os(iOS)
+    /// iOS 推送管理器(AppDelegate 注入),供 Settings 屏读 device token / 重新注册。
+    weak var pushManager: PushManager? = nil
+    #endif
 
     init(calendar: TradingCalendar = StaticTradingCalendar.shared,
          clientProvider: @escaping () -> APIClient? = { nil }) {

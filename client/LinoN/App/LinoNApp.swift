@@ -32,7 +32,9 @@ struct LinoNApp: App {
         }
         .windowResizability(.contentSize)
         Settings {
-            SettingsView(config: config)
+            SettingsView(model: model, config: config)
+                .frame(width: 460)
+                .padding(20)
         }
         #else
         WindowGroup {
@@ -51,55 +53,6 @@ struct LinoNApp: App {
     }
 }
 
-// MARK: - 设置(后端连接 + API Token 填入,token 不入源码)
-
-struct SettingsView: View {
-    @ObservedObject var config: AppConfig
-    @State private var healthOK: Bool? = nil
-    @State private var checking = false
-
-    var body: some View {
-        Form {
-            Section("后端连接") {
-                Picker("环境", selection: $config.environment) {
-                    ForEach(LNEnvironment.allCases) { env in
-                        Text(env.label).tag(env)
-                    }
-                }
-                TextField("baseURL 覆盖(可选)", text: $config.baseURLOverride)
-                    .font(.system(.body).monospaced())
-                LabeledContent("生效 baseURL", value: config.resolvedBaseURL.absoluteString)
-            }
-            Section("鉴权") {
-                SecureField("API Token(不入源码)", text: $config.apiToken)
-                    .font(.system(.body).monospaced())
-                Text("Token 存于本机,绝不提交进 git。dev 用 backend/.env 的 API_TOKEN。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("连通性自检") {
-                Button(checking ? "检测中…" : "测试 /health") {
-                    Task { await checkHealth() }
-                }
-                .disabled(checking)
-                if let ok = healthOK {
-                    Label(ok ? "后端可达" : "后端不可达",
-                          systemImage: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundStyle(ok ? LN.up : LN.down)
-                }
-            }
-        }
-        .padding(20)
-        .frame(width: 460)
-    }
-
-    private func checkHealth() async {
-        checking = true
-        let client = APIClient(baseURL: config.resolvedBaseURL, token: config.apiToken)
-        healthOK = (try? await client.health()) ?? false
-        checking = false
-    }
-}
-
 #if os(iOS)
 import UIKit
 
@@ -114,6 +67,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             let pm = PushManager(config: config, model: model)
             pm.bootstrap()
             self.pushManager = pm
+            model.pushManager = pm   // 供 Settings 屏读 device token / 重新注册
             // 启动即请求授权 + 注册(真机才拿得到真 token)。
             Task { await pm.requestAuthorizationAndRegister() }
             if let t = pendingToken { pm.didRegister(deviceToken: t); pendingToken = nil }

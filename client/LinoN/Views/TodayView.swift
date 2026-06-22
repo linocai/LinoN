@@ -11,6 +11,8 @@ import SwiftUI
 
 struct TodayViewIOS: View {
     @Bindable var model: AppModel
+    @EnvironmentObject private var config: AppConfig
+    @State private var showSettings = false
 
     var body: some View {
         ScrollView {
@@ -41,6 +43,16 @@ struct TodayViewIOS: View {
         .background(LN.pageBgIOS)
         .refreshable { await model.refresh() }
         .animation(.easeOut(duration: 0.3), value: model.holdings.map(\.id))
+        .sheet(isPresented: $showSettings) {
+            NavigationStack {
+                SettingsView(model: model, config: config)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { showSettings = false }
+                        }
+                    }
+            }
+        }
     }
 
     private var header: some View {
@@ -51,14 +63,24 @@ struct TodayViewIOS: View {
                     .font(.system(size: 13)).foregroundStyle(LN.textSecondary)
             }
             Spacer()
-            Button(action: { model.openEntry() }) {
-                Image(systemName: "plus")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(LN.accent)
-                    .frame(width: 38, height: 38)
-                    .background(Circle().fill(LN.accent.opacity(0.1)))
+            HStack(spacing: 10) {
+                Button(action: { showSettings = true }) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(LN.textSecondary)
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(LN.chipNeutral))
+                }
+                .buttonStyle(.plain)
+                Button(action: { model.openEntry() }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(LN.accent)
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(LN.accent.opacity(0.1)))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 4)
     }
