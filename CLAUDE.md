@@ -28,6 +28,8 @@
 - **依赖**:`PyJWT==2.9.0`/`cryptography==44.0.0`/`httpx[http2]==0.27.2`(钉死,兼容 3.9);`httpx` 也是 FastAPI `TestClient` 的依赖。装库走阿里云镜像(`PIP_INDEX_URL`)。
 - **冒烟**:`bash scripts/smoke_api.sh`(起 uvicorn → curl 全闭环);需 `.env` 有 `API_TOKEN`。**真 APNs 实推/ECS/真机留 track C/B**(无设备 token,A.4 只到单测)。
 - **pydantic v2 settings 可 monkeypatch**:测试里 `monkeypatch.setattr(settings, "API_TOKEN", x, raising=False)` 可行(模型非 frozen);上文"不能 setattr"指的是无 monkeypatch 的裸赋值场景。
+- **监控一 tick 唯一拉价口(审后修复 #1)**:`run_one_tick` **不再二次拉价**——price 与两源一致性校验都复用 `two_source_fn`(默认 `_build_two_source_quotes`,两源各拉一次)的同一对结果;merged price 由 `_merge_price_quote(优先 sina、缺则 tencent)` 派生,口径同 `get_realtime_quotes`。`quotes_fn` 退化为**可选覆盖**:仅显式注入时才用它供 price(老测试/特殊场景),不传则不调。改监控拉价逻辑务必守"每源每 tick ≤1 拉"。
+- **D4 时间升级重启不丢(审后修复 #2)**:升级状态仍只在内存。`classify` 只在 `count==4` 产 time 事件,`count≥5` 不产;故 D4 后/夜间重启会丢未 ack 的 D4 nag。修法 = monitor 层恢复(**不动** `should_force_close` 的 `count==4` 契约):lifespan 启动调 `rebuild_time_escalations` + 每 tick `_ensure_time_escalation`,对 `holding` 且 `count_holding_trade_days≥4` 的持仓**保证恒有一条 active time 升级**直到 ack/清仓。**幂等靠 `EscalationManager.has_track(code,kind)`**——已存在(含已 ack)即不重建、不重置 badge(`register` 本就只刷 event 不动 push_count,双保险)。改这块切记别让重跑把 badge 打回 1。
 
 ## 数据源坑(已验证)
 

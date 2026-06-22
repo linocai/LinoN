@@ -21,13 +21,19 @@ import logging
 from datetime import date, datetime, time
 from typing import Callable, Dict, List, Optional
 
-from app.calendar.trading_calendar import trading_window
+from app.calendar.trading_calendar import (
+    count_holding_trade_days,
+    trading_window,
+)
 from app.config import settings
 from app.db import store
 from app.monitor.escalation import EscalationManager
 from app.monitor.hardline import (
+    KIND_TIME,
     HardlineEvent,
+    _time_event,
     classify,
+    pnl_pct_of,
     quotes_consistent,
 )
 from app.monitor.eod import build_eod_summaries
@@ -58,27 +64,85 @@ def _is_after_close(now: datetime) -> bool:
 
 
 def _build_two_source_quotes(codes: List[str]) -> Dict[str, dict]:
-    """拉两源现价用于一致性校验(新浪 + 腾讯各拉一遍)。
+    """拉两源现价(新浪 + 腾讯各拉【一次】)。监控一 tick 的唯一拉价口。
 
     返回 {code: {"sina": Quote|None, "tencent": Quote|None}}。
-    复用 realtime 内部 fetch;为简洁直接用 get_realtime_quotes(主源)+ 单独腾讯探测。
+    每个源对全量 code 只发一次请求;price 与一致性校验都复用这同一对结果
+    (审后修复 #1:不再额外调 get_realtime_quotes,免免费源限频/封 IP 翻倍)。
     """
     from app.data import realtime
     out: Dict[str, dict] = {c: {"sina": None, "tencent": None} for c in codes}
     syms = {realtime.to_symbol(c): c for c in codes}
-    # 新浪
+    # 新浪(一次)
     sina_raw = realtime._fetch_sina(list(syms.keys()))
     for sym, body in sina_raw.items():
         q = realtime._parse_sina(sym, body)
         if q is not None and sym in syms:
             out[syms[sym]]["sina"] = q
-    # 腾讯
+    # 腾讯(一次)
     tx_raw = realtime._fetch_tencent(list(syms.keys()))
     for sym, body in tx_raw.items():
         q = realtime._parse_tencent(sym, body)
         if q is not None and sym in syms:
             out[syms[sym]]["tencent"] = q
     return out
+
+
+def _merge_price_quote(srcs: dict):
+    """从两源结果派生本票"现价"用 Quote(优先 sina、缺则 tencent;均缺则 None)。
+
+    与 get_realtime_quotes 的降级口径一致(新浪主、腾讯补),但不另发请求。
+    """
+    if not srcs:
+        return None
+    return srcs.get("sina") or srcs.get("tencent")
+
+
+def _ensure_time_escalation(esc: EscalationManager, holding: dict, now: datetime) -> bool:
+    """审后修复 #2:逾期在持仓(count≥4)缺 time 升级时补一条(幂等)。
+
+    classify 只在 count==4 产 time 事件;过了 D4(count≥5)不再产,若服务在
+    D4 收盘后/夜间重启,内存升级丢失后 D5 不会重建 → D4 无条件清仓逼促永久漏。
+    这里对任一 status='holding' 且 count_holding_trade_days≥4 的持仓,保证始终有
+    一条 active 未 ack 的 time 升级,直到被 ack 或清仓。
+
+    关键幂等:已存在该 (code, KIND_TIME) 升级时【不动】badge/计数,只在缺失时新建。
+    返回 True 表示本次新建,False 表示已存在(未动)。
+    """
+    code = holding["code"]
+    td = count_holding_trade_days(holding["buy_date"], now.date())
+    if td < 4:
+        return False
+    if esc.has_track(code, KIND_TIME):
+        return False  # 幂等:已存在(含已 ack)不重建、不重置 badge
+    pnl = pnl_pct_of(holding["buy_price"], holding["buy_price"])  # 无价时按 0
+    ev = _time_event(holding["name"], code, pnl, td)
+    esc.register(ev, now=now)
+    return True
+
+
+def rebuild_time_escalations(esc: EscalationManager, now: datetime, db_path: Optional[str] = None) -> int:
+    """启动时从 positions 重建逾期(count≥4)在持仓的 time 升级(审后修复 #2)。
+
+    保证服务重启后,D4+ 在持仓立即重获 active time 升级,不必等下一价格线触发。
+    幂等:复用 _ensure_time_escalation(已存在不动)。返回新建条数。
+    """
+    n = 0
+    for h in store.list_holdings(db_path):
+        if _ensure_time_escalation(esc, h, now=now):
+            n += 1
+    return n
+
+
+def _qattr(q, name: str, default: float = 0.0) -> float:
+    """从 Quote(对象)或 dict 取数值字段。"""
+    if q is None:
+        return default
+    if hasattr(q, name):
+        return getattr(q, name)
+    if isinstance(q, dict):
+        return q.get(name, default)
+    return default
 
 
 def run_one_tick(
@@ -93,32 +157,49 @@ def run_one_tick(
     """执行一轮监控(纯过程,可单测):拉价 → 判硬线 → 升级 → 推送。
 
     返回本轮摘要 {events, pushes}(供测试断言/日志)。不联网时注入 fns。
+
+    审后修复 #1:每个源每 tick 只拉一次。price 与一致性校验复用同一对两源结果
+      (两源各拉一次 → 派生 merged price:优先 sina、缺则 tencent;一致性校验
+       也用这同一对结果,不额外再调 get_realtime_quotes)。
+      quotes_fn 仅为向后兼容/测试覆盖保留:显式传入时仍用它供 price,否则
+      price 直接从 two_source_fn 结果派生(默认不再二次拉价)。
+    审后修复 #2:每 tick 对 count≥4 的逾期在持仓 ensure 一条 active time 升级
+      (幂等:已存在则不动 badge/计数),保证 D4 后重启不丢 D4 无条件清仓逼促。
     """
-    quotes_fn = quotes_fn or _default_quotes_fn
     two_source_fn = two_source_fn or _build_two_source_quotes
     push_fn = push_fn or apns.send_push
 
     holdings = store.list_holdings(db_path)
     if not holdings:
+        # 无持仓也无需 ensure;直接返回
         return {"events": [], "pushes": 0, "holdings": 0}
 
     codes = [h["code"] for h in holdings]
-    quotes = quotes_fn(codes)
     two_src = two_source_fn(codes)
+    # price 默认从两源结果派生(不二次拉价);仅当显式注入 quotes_fn 时才用它。
+    quotes = quotes_fn(codes) if quotes_fn is not None else None
 
     all_events: List[HardlineEvent] = []
     for h in holdings:
         code = h["code"]
-        q = quotes.get(code)
+        srcs = two_src.get(code, {}) or {}
+        # price 用 Quote:注入了 quotes_fn 取之,否则从两源派生(优先 sina)
+        if quotes is not None:
+            q = quotes.get(code)
+        else:
+            q = _merge_price_quote(srcs)
+
+        # 审后修复 #2:逾期在持仓(count≥4)无条件 ensure 一条 time 升级(幂等)
+        _ensure_time_escalation(esc, h, now=now)
+
         if q is None:
             continue
-        price = q.price if hasattr(q, "price") else q.get("price", 0.0)
-        pre_close = q.pre_close if hasattr(q, "pre_close") else q.get("pre_close", 0.0)
-        limit_up = q.limit_up if hasattr(q, "limit_up") else q.get("limit_up", 0.0)
-        limit_down = q.limit_down if hasattr(q, "limit_down") else q.get("limit_down", 0.0)
+        price = _qattr(q, "price")
+        pre_close = _qattr(q, "pre_close")
+        limit_up = _qattr(q, "limit_up")
+        limit_down = _qattr(q, "limit_down")
 
-        # 两源一致性
-        srcs = two_src.get(code, {})
+        # 两源一致性(复用同一对结果,不额外再拉)
         sa, sb = srcs.get("sina"), srcs.get("tencent")
         suspect = False
         if sa is not None and sb is not None:

@@ -106,6 +106,14 @@ class EscalationManager:
         return n
 
     # —— 内省 ————————————————————————————————————————————————————
+    def has_track(self, code: str, kind: str) -> bool:
+        """是否已存在该 (code, kind) 升级(含已 ack)。
+
+        供 loop 侧 time 升级 ensure 幂等判断:已存在则不重建、不重置 badge。
+        含已 ack 的轨道 → 用户已处理该 D4,不应复活再 nag。
+        """
+        return _key(code, kind) in self._tracks
+
     def active_tracks(self) -> List[_Track]:
         """未 ack 的硬线(供心跳/调试)。"""
         return [t for t in self._tracks.values() if not t.acked]

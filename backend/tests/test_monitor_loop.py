@@ -104,6 +104,151 @@ def test_no_holdings_no_push(db):
     assert res["holdings"] == 0 and res["pushes"] == 0
 
 
+# ————————————————————————————————————————————————————————————————————
+# 审后修复 #1:一 tick 内每源只拉一次(price 与一致性校验复用同一对结果)
+# ————————————————————————————————————————————————————————————————————
+
+def test_tick_pulls_each_source_once(db):
+    """不注入 quotes_fn → price 从 two_source_fn 派生,两源各只拉一次。
+
+    断言:two_source_fn 整 tick 只被调一次;price/suspect 行为与原先一致
+    (优先 sina;两源都齐才比一致性)。
+    """
+    _seed(db)
+    esc = EscalationManager(interval_min=15)
+    pushes = []
+    calls = {"two_src": 0}
+
+    def two_src(codes):
+        calls["two_src"] += 1
+        # sina 现价 94(-6% 触损),tencent 一致 → 不 suspect
+        return {c: {"sina": _Q(94.0, pre_close=99.0),
+                    "tencent": _Q(94.1, pre_close=99.0)} for c in codes}
+
+    res = loop_mod.run_one_tick(
+        esc=esc, now=datetime(2026, 6, 23, 10, 0, 0),   # D2
+        two_source_fn=two_src,
+        push_fn=lambda *a, **k: pushes.append((a, k)),
+        db_path=db,
+    )
+    # two_source_fn 整 tick 只调一次(每源各拉一次的唯一拉价口)
+    assert calls["two_src"] == 1
+    # price 从两源派生(优先 sina 的 94 → -6% 触损);行为与原先一致
+    assert len(res["events"]) == 1 and res["events"][0].kind == "stop"
+    assert res["pushes"] == 1 and len(pushes) == 1
+
+
+def test_tick_suspect_reuses_same_pull(db):
+    """两源派生时,一致性校验复用同一对结果:pre_close 分歧 → suspect 不触发硬线。"""
+    _seed(db)
+    esc = EscalationManager(interval_min=15)
+    pushes = []
+    calls = {"two_src": 0}
+
+    def two_src(codes):
+        calls["two_src"] += 1
+        return {c: {"sina": _Q(94.0, pre_close=90.0),
+                    "tencent": _Q(94.0, pre_close=99.0)} for c in codes}
+
+    res = loop_mod.run_one_tick(
+        esc=esc, now=datetime(2026, 6, 23, 10, 0, 0),
+        two_source_fn=two_src,
+        push_fn=lambda *a, **k: pushes.append((a, k)),
+        db_path=db,
+    )
+    assert calls["two_src"] == 1
+    assert all(e.kind == "suspect" for e in res["events"])
+    assert res["pushes"] == 0 and pushes == []
+
+
+# ————————————————————————————————————————————————————————————————————
+# 审后修复 #2:D4 后重启不丢 time 升级(启动重建 + 每 tick ensure + 幂等)
+# ————————————————————————————————————————————————————————————————————
+
+def test_rebuild_time_escalation_on_restart(db):
+    """模拟重启:空 escalation + 一只 count≥4(D5)未平持仓 → 启动重建 → 有 active time 升级且会 due_push。"""
+    # buy 2026-06-15 → 到 2026-06-22 count==5(过 D4,classify 不再产 time 事件)
+    _seed(db, code="600000", buy_price=100.0, buy_date="2026-06-15")
+    esc = EscalationManager(interval_min=15)   # 全新空状态 = 重启后
+    assert esc.has_track("600000", "time") is False
+
+    n = loop_mod.rebuild_time_escalations(esc, now=datetime(2026, 6, 22, 9, 30), db_path=db)
+    assert n == 1
+    assert esc.has_track("600000", "time") is True
+    # 该 time 升级 active 且会 due_push(badge 从 1 起)
+    due = esc.due_pushes(now=datetime(2026, 6, 22, 9, 30))
+    assert len(due) == 1 and due[0][1] == 1
+    assert due[0][0].event.kind == "time"
+
+
+def test_tick_ensures_time_escalation_for_overdue(db):
+    """count≥4 在持仓即便价格线未触发,每 tick 也 ensure 一条 time 升级并推送。"""
+    _seed(db, code="600000", buy_price=100.0, buy_date="2026-06-15")   # D5
+    esc = EscalationManager(interval_min=15)
+    pushes = []
+
+    res = loop_mod.run_one_tick(
+        esc=esc, now=datetime(2026, 6, 22, 10, 0, 0),
+        # 现价 100(0% 不触价格线)→ 仅靠 ensure 产 time 升级
+        two_source_fn=lambda codes: {c: {"sina": _Q(100.0, pre_close=99.0), "tencent": None} for c in codes},
+        push_fn=lambda *a, **k: pushes.append((a, k)),
+        db_path=db,
+    )
+    # 无价格线事件,但 ensure 出 time 升级 → 推 1 条
+    assert res["pushes"] == 1 and len(pushes) == 1
+    _, kw = pushes[0]
+    assert kw["custom"]["kind"] == "time" and kw["badge_escalation"] == 1
+    assert esc.has_track("600000", "time") is True
+
+
+def test_ensure_time_escalation_idempotent_no_badge_reset(db):
+    """已有 time 升级时重跑(重建/再 tick)不重置 badge/计数(幂等)。"""
+    _seed(db, code="600000", buy_price=100.0, buy_date="2026-06-15")   # D5
+    esc = EscalationManager(interval_min=15)
+    now0 = datetime(2026, 6, 22, 9, 30)
+
+    # 首次重建 → 新建 + 推一次(badge=1)
+    assert loop_mod.rebuild_time_escalations(esc, now=now0, db_path=db) == 1
+    due = esc.due_pushes(now=now0)
+    esc.mark_pushed(due[0][0], now=now0)   # push_count → 1
+
+    # 15min 后再推一次 → badge=2
+    now1 = now0.replace(minute=45)
+    due = esc.due_pushes(now=now1)
+    assert len(due) == 1 and due[0][1] == 2
+    esc.mark_pushed(due[0][0], now=now1)   # push_count → 2
+
+    # 再次重建/ensure(模拟又一次重启或下一 tick)→ 已存在,不重置
+    assert loop_mod.rebuild_time_escalations(esc, now=now1, db_path=db) == 0
+    # badge 没被打回 1:此刻未到下一 interval → 无 due;下一 interval 应是 3 不是 1
+    now2 = now1.replace(hour=10, minute=5)   # 距上次 push 已 >15min
+    due = esc.due_pushes(now=now2)
+    assert len(due) == 1 and due[0][1] == 3   # 计数延续(2→3),证明未被重置
+
+
+def test_ensure_time_escalation_stops_after_ack(db):
+    """ack 后该 code 的 time 升级停;重跑 ensure 不复活(has_track 含已 ack)。"""
+    _seed(db, code="600000", buy_price=100.0, buy_date="2026-06-15")   # D5
+    esc = EscalationManager(interval_min=15)
+    now0 = datetime(2026, 6, 22, 9, 30)
+
+    loop_mod.rebuild_time_escalations(esc, now=now0, db_path=db)
+    assert esc.ack("600000", "marked_close") == 1   # 用户处理
+    # ack 后无 due
+    assert esc.due_pushes(now=now0.replace(hour=11)) == []
+    # 再 ensure(下一 tick)不复活
+    assert loop_mod.rebuild_time_escalations(esc, now=now0.replace(hour=11), db_path=db) == 0
+    assert esc.due_pushes(now=now0.replace(hour=11)) == []
+
+
+def test_no_time_escalation_before_d4(db):
+    """count<4(D3)不 ensure time 升级(不误产)。"""
+    _seed(db, code="600000", buy_price=100.0, buy_date="2026-06-17")   # 到 06-22 count==3
+    esc = EscalationManager(interval_min=15)
+    assert loop_mod.rebuild_time_escalations(esc, now=datetime(2026, 6, 22, 9, 30), db_path=db) == 0
+    assert esc.has_track("600000", "time") is False
+
+
 def test_trading_time_helpers():
     # 2026-06-23 周二交易日 10:00 在交易段;20:00 不在
     assert loop_mod._is_trading_now(datetime(2026, 6, 23, 10, 0)) is True

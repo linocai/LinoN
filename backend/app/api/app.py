@@ -56,6 +56,13 @@ async def lifespan(app: FastAPI):
     app.state.escalation = EscalationManager(
         interval_min=settings.ESCALATE_INTERVAL_MIN
     )
+    # 审后修复 #2:升级状态仅内存,重启会丢。启动时从 positions 重建
+    # count≥4 逾期在持仓的 time 升级,使 D4 后重启/夜间重启不丢"D4 无条件清仓"逼促。
+    from datetime import datetime as _dt
+    from app.monitor.loop import rebuild_time_escalations
+    rebuilt = rebuild_time_escalations(app.state.escalation, now=_dt.now())
+    if rebuilt:
+        logger.info("启动重建逾期 time 升级 %d 条(D4+ 持仓)", rebuilt)
     app.state._stop_event = asyncio.Event()
     app.state._monitor_task = None
     if ENABLE_MONITOR:
