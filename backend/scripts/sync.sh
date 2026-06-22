@@ -85,6 +85,7 @@ RSYNC_OPTS=(-az --delete
   --exclude '.pytest_cache/'
   --exclude 'data/'          # SQLite 落盘不传(远端独立库)
   --exclude '.env'           # 密钥不随同步覆盖(远端 .env 独立维护)
+  --exclude '*.p8'           # APNs 私钥:远端独立维护,绝不被 --delete 清掉
   --exclude 'client'         # 客户端不进后端部署
   --exclude '*.db'
   --exclude '.DS_Store'
