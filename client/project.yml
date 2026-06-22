@@ -31,6 +31,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: top.linotsai.linon
         PRODUCT_NAME: LinoN
+        # 推送 entitlement 仅 iOS 应用(真机/模拟器);macOS 不开推送(平台分叉,本期 OUT)
+        "CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]": LinoN/LinoN.entitlements
+        "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": LinoN/LinoN.entitlements
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: LinoN/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

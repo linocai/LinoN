@@ -17,7 +17,9 @@ import UserNotifications
 
 /// 硬线通知 category 标识(与后端 send_push 的 category 对齐)。
 enum LNNotificationCategory {
-    static let hardline = "LN_HARDLINE"
+    // ⚠️ 必须与后端 apns.py 的 CATEGORY_HARDLINE 字面量一致("HARDLINE"),
+    //    否则锁屏不显示动作按钮(category 标识不匹配)。
+    static let hardline = "HARDLINE"
     static let actionMarkClose = "LN_MARK_CLOSE"
     static let actionAskCoach = "LN_ASK_COACH"
 }
@@ -91,6 +93,10 @@ final class PushManager: NSObject, ObservableObject, UNUserNotificationCenterDel
     func didRegister(deviceToken: Data) {
         let tokenHex = deviceToken.map { String(format: "%02x", $0) }.joined()
         lastDeviceToken = tokenHex
+        #if DEBUG
+        // track C.3 本地推送自测:从 Xcode 控制台抓真机 device token(沙盒)
+        print("🔑 [LinoN] APNs device token (sandbox): \(tokenHex)")
+        #endif
         Task {
             let client = APIClient(baseURL: config.resolvedBaseURL, token: config.apiToken)
             do {

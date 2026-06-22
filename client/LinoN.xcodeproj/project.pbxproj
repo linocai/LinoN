@@ -55,6 +55,7 @@
 		601D8AD25F441E854DBFEC84 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
 		8736D47CD5308B0DA24A631E /* SignatureFormulaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignatureFormulaTests.swift; sourceTree = "<group>"; };
 		88AA21D75633F0446DA30DBD /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
+		92F056BB9D43BA38337CEC49 /* LinoN.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LinoN.entitlements; sourceTree = "<group>"; };
 		963822D25C21FAE170471799 /* HoldingCardModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoldingCardModel.swift; sourceTree = "<group>"; };
 		A470D7862F2D67A2D7703862 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		AB41E94390C1F4A4E8330A67 /* KPIViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KPIViews.swift; sourceTree = "<group>"; };
@@ -106,6 +107,7 @@
 		3ED185C9DBC50D5DFBF4F0B4 /* LinoN */ = {
 			isa = PBXGroup;
 			children = (
+				92F056BB9D43BA38337CEC49 /* LinoN.entitlements */,
 				26907A7F08D79CB67A35331D /* App */,
 				A54C27BC3B74BA914BE394B9 /* Calendar */,
 				2CC199FD2796DB26EE06EB36 /* Components */,
@@ -397,6 +399,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = LinoN/LinoN.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = LinoN/LinoN.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -516,6 +520,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = LinoN/LinoN.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = LinoN/LinoN.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
