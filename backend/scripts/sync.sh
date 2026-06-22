@@ -54,15 +54,21 @@ EOF
 fi
 
 # —— 选定 GNU rsync 3.x(macOS 自带 openrsync 与 --delete 不兼容,见 ~/Lino/hz_info.md)——
+# 注:用命令替换捕获版本串再 case 匹配。直接 `rsync --version | head -1 | grep` 在
+#     `set -o pipefail` 下会因 head 提前关管道使 rsync 收 SIGPIPE(141)、把命中误判为失败。
+_is_gnu_rsync3() {
+  case "$("$1" --version 2>/dev/null | head -1 || true)" in
+    *rsync*"version 3"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 RSYNC_BIN="${RSYNC_BIN:-rsync}"
-if ! "${RSYNC_BIN}" --version 2>/dev/null | head -1 | grep -qE 'rsync +version 3'; then
+if ! _is_gnu_rsync3 "${RSYNC_BIN}"; then
   for cand in /opt/homebrew/bin/rsync /usr/local/bin/rsync; do
-    if [ -x "${cand}" ] && "${cand}" --version 2>/dev/null | head -1 | grep -qE 'rsync +version 3'; then
-      RSYNC_BIN="${cand}"; break
-    fi
+    if [ -x "${cand}" ] && _is_gnu_rsync3 "${cand}"; then RSYNC_BIN="${cand}"; break; fi
   done
 fi
-if ! "${RSYNC_BIN}" --version 2>/dev/null | head -1 | grep -qE 'rsync +version 3'; then
+if ! _is_gnu_rsync3 "${RSYNC_BIN}"; then
   cat <<'EOF'
 [sync.sh] 未找到 GNU rsync 3.x。macOS 自带 openrsync 与 --delete 不兼容(见 hz_info.md)。
   安装:  brew install rsync
