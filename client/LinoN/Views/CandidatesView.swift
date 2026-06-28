@@ -196,19 +196,39 @@ struct CandidatesViewMac: View {
 struct CandidatesExplainBar: View {
     let headline: String
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Text(headline)
-                .font(.system(size: 13)).foregroundStyle(LN.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            HStack(spacing: 6) {
-                tag("权重 放量▸资金▸换手▸低位")
-                tag("已排除 300/688/白酒/ST")
+        Group {
+            #if os(iOS)
+            // iOS 窄屏:headline 占满宽在上、pill 行在下。
+            // 旧版与两个定宽(.fixedSize)pill 挤一个 HStack,窄屏 pill 抢光宽度→ headline 被压成一字一行竖排。
+            VStack(alignment: .leading, spacing: 10) {
+                headlineText.frame(maxWidth: .infinity, alignment: .leading)
+                pills
             }
+            #else
+            // macOS 宽屏:headline 左、pill 右横排(放得下,保持原设计)。
+            HStack(alignment: .center, spacing: 12) {
+                headlineText
+                Spacer(minLength: 8)
+                pills
+            }
+            #endif
         }
         .padding(.horizontal, 18).padding(.vertical, 13)
         .background(RoundedRectangle(cornerRadius: 13).fill(LN.accent.opacity(0.05)))
         .overlay(RoundedRectangle(cornerRadius: 13).stroke(LN.accent.opacity(0.16), lineWidth: 0.5))
+    }
+
+    private var headlineText: some View {
+        Text(headline)
+            .font(.system(size: 13)).foregroundStyle(LN.textPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var pills: some View {
+        HStack(spacing: 6) {
+            tag("权重 放量▸资金▸换手▸低位")
+            tag("已排除 300/688/白酒/ST")
+        }
     }
 
     private func tag(_ s: String) -> some View {
