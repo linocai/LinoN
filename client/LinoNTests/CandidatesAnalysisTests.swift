@@ -1,0 +1,186 @@
+//
+//  CandidatesAnalysisTests.swift
+//  LinoN — 阶段2 前端 E1/E2 单测
+//
+//  覆盖:满仓闭门联动(shownCandidates/openSlots/candidatesClosed)、
+//  深析卡 DeepAnalysis JSON 解码(对齐后端 dict 形状 + 枚举映射)、
+//  buyFromAnalysis 预填开仓 sheet、sendComposer / backFromAnalysis 状态机。
+//
+
+import XCTest
+@testable import LinoN
+
+@MainActor
+final class CandidatesGatingTests: XCTestCase {
+
+    private func makeCandidate(rank: Int, code: String, volPct: Int = 50,
+                              warn: String? = nil) -> Candidate {
+        let neutral = AnalysisAxis(value: "—", tone: .neutral, text: "")
+        let a = DeepAnalysis(form: neutral, fund: neutral, news: neutral, verdict: .watch, plan: "")
+        return Candidate(rank: rank, name: "票\(rank)", code: code, sector: "半导体", tag: "平台突破",
+                         price: 10, chg: "+2.00%", volMultiple: "2.0x", volPct: volPct,
+                         flow: "+0.5亿", turnover: "3.0%", warn: warn, analysis: a)
+    }
+
+    private func makePos(_ code: String) -> Position {
+        Position(id: Int.random(in: 1...9999), code: code, name: code, buyPrice: 10, qty: 100,
+                 entryReason: "x", entrySnapshot: nil, buyDate: Date())
+    }
+
+    func testOpenSlotsAndClosed() {
+        let m = AppModel()
+        XCTAssertEqual(m.openSlots, 3)            // 空仓
+        XCTAssertFalse(m.candidatesClosed)
+        m.holdings = [makePos("a"), makePos("b"), makePos("c")]
+        XCTAssertEqual(m.openSlots, 0)            // 满仓
+        XCTAssertTrue(m.candidatesClosed)
+    }
+
+    func testShownCandidatesTruncatesByFreeSlots() {
+        let m = AppModel()
+        m.candidates = (1...20).map { makeCandidate(rank: $0, code: "c\($0)") }
+        // 空 3 仓 → 5×3 = 15
+        XCTAssertEqual(m.shownCandidates.count, 15)
+        // 持 1 → 空 2 → 5×2 = 10
+        m.holdings = [makePos("h1")]
+        XCTAssertEqual(m.shownCandidates.count, 10)
+        // 满仓 → 闭门 → 0
+        m.holdings = [makePos("h1"), makePos("h2"), makePos("h3")]
+        XCTAssertEqual(m.shownCandidates.count, 0)
+    }
+
+    func testShownCandidatesShorterThanLimit() {
+        let m = AppModel()
+        m.candidates = (1...4).map { makeCandidate(rank: $0, code: "c\($0)") }
+        // 候选少于 5×freeSlots 取全部
+        XCTAssertEqual(m.shownCandidates.count, 4)
+    }
+
+    func testHeadlineAndFootnoteCopy() {
+        let m = AppModel()
+        m.candidates = (1...20).map { makeCandidate(rank: $0, code: "c\($0)") }
+        XCTAssertTrue(CandidatesCopy.headline(m).contains("空 3 仓位"))
+        XCTAssertTrue(CandidatesCopy.headline(m).contains("15"))
+        m.holdings = [makePos("h1"), makePos("h2"), makePos("h3")]
+        XCTAssertTrue(CandidatesCopy.headline(m).contains("闭门"))
+    }
+}
+
+@MainActor
+final class AnalysisStateTests: XCTestCase {
+
+    private func makeCandidate(code: String) -> Candidate {
+        let g = AnalysisAxis(value: "强", tone: .good, text: "放量突破")
+        let a = DeepAnalysis(form: g, fund: g, news: g, verdict: .enter, plan: "不追高")
+        return Candidate(rank: 1, name: "东方电缆", code: code, sector: "海缆", tag: "低位平台突破",
+                         price: 48.30, chg: "+4.20%", volMultiple: "2.8x", volPct: 90,
+                         flow: "+0.9亿", turnover: "6.2%", warn: nil, analysis: a)
+    }
+
+    func testBuyFromAnalysisPrefillsOpenForm() async throws {
+        let m = AppModel()
+        let c = makeCandidate(code: "603606")
+        m.candidates = [c]
+        m.selectedCode = "603606"
+        m.inAnalysis = true
+        m.buyFromAnalysis()
+        // 全屏即时关闭;modal 在 iOS 上推到下一 tick(避 cover↔sheet 同帧交接)。
+        XCTAssertFalse(m.inAnalysis)
+        #if os(iOS)
+        try await Task.sleep(nanoseconds: 600_000_000)   // 等过 350ms 推迟窗口
+        #endif
+        XCTAssertEqual(m.modal, .open)
+        XCTAssertEqual(m.form.code, "603606")
+        XCTAssertEqual(m.form.name, "东方电缆")
+        XCTAssertEqual(m.form.price, "48.30")
+        XCTAssertEqual(m.form.reason, "低位平台突破")   // tag 非空 → 用 tag
+    }
+
+    func testSendComposerAppendsUserThenAssistant() {
+        let m = AppModel()
+        m.composer = "这只能进吗"
+        m.sendComposer()
+        XCTAssertEqual(m.thread.count, 2)
+        XCTAssertEqual(m.thread[0].role, .user)
+        XCTAssertEqual(m.thread[0].text, "这只能进吗")
+        XCTAssertEqual(m.thread[1].role, .assistant)
+        XCTAssertEqual(m.composer, "")           // 发送后清空
+    }
+
+    func testSendComposerIgnoresBlank() {
+        let m = AppModel()
+        m.composer = "   "
+        m.sendComposer()
+        XCTAssertTrue(m.thread.isEmpty)
+    }
+
+    func testBackFromAnalysisResets() {
+        let m = AppModel()
+        m.inAnalysis = true
+        m.thread = [ChatMessage(role: .user, text: "hi")]
+        m.composer = "draft"
+        m.analysisContext = AnalysisContext(name: "x", code: "1", price: 1, chg: "+1%",
+                                            chgIsUp: true, meta: "", hint: "")
+        m.backFromAnalysis()
+        XCTAssertFalse(m.inAnalysis)
+        XCTAssertTrue(m.thread.isEmpty)
+        XCTAssertNil(m.analysisContext)
+        XCTAssertEqual(m.composer, "")
+    }
+}
+
+// MARK: - DeepAnalysis JSON 解码(对齐后端 analyze/coach 返回的 analysis dict 形状)
+
+final class DeepAnalysisDecodeTests: XCTestCase {
+
+    func testDecodesBackendAnalysisShape() throws {
+        // 形状 = backend app/llm:form/fund/news 各 {value,tone,text} + verdict + plan
+        let json = """
+        {
+          "form": {"value": "平台突破", "tone": "good", "text": "放量站上 20 日均线。"},
+          "fund": {"value": "确认", "tone": "warn", "text": "主力净流入,当日小单流出。"},
+          "news": {"value": "无雷", "tone": "neutral", "text": "未见监管警告。"},
+          "verdict": "可进",
+          "plan": "不追高:回踩平台更稳。"
+        }
+        """.data(using: .utf8)!
+        let a = try JSONDecoder().decode(DeepAnalysis.self, from: json)
+        XCTAssertEqual(a.form.value, "平台突破")
+        XCTAssertEqual(a.form.tone, .good)
+        XCTAssertEqual(a.fund.tone, .warn)
+        XCTAssertEqual(a.news.tone, .neutral)
+        XCTAssertEqual(a.verdict, .enter)
+        XCTAssertEqual(a.plan, "不追高:回踩平台更稳。")
+    }
+
+    func testDecodesDegradedPlaceholder() throws {
+        // 降级占位卡:verdict=观望、三轴 neutral(后端上游失败仍 200 返此)
+        let json = """
+        {
+          "form": {"value": "暂无", "tone": "neutral", "text": "深判降级。"},
+          "fund": {"value": "暂无", "tone": "neutral", "text": ""},
+          "news": {"value": "暂无", "tone": "neutral", "text": ""},
+          "verdict": "观望",
+          "plan": "数据不足,观望。"
+        }
+        """.data(using: .utf8)!
+        let a = try JSONDecoder().decode(DeepAnalysis.self, from: json)
+        XCTAssertEqual(a.verdict, .watch)
+        XCTAssertEqual(a.form.tone, .neutral)
+    }
+
+    func testDecodesAvoidVerdict() throws {
+        let json = """
+        {
+          "form": {"value": "弱", "tone": "bad", "text": "高位。"},
+          "fund": {"value": "流出", "tone": "bad", "text": "主力净流出。"},
+          "news": {"value": "存疑", "tone": "warn", "text": "舆情转冷。"},
+          "verdict": "不进",
+          "plan": "不进,等回踩。"
+        }
+        """.data(using: .utf8)!
+        let a = try JSONDecoder().decode(DeepAnalysis.self, from: json)
+        XCTAssertEqual(a.verdict, .avoid)
+        XCTAssertEqual(a.form.tone, .bad)
+    }
+}

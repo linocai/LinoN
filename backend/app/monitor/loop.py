@@ -47,6 +47,8 @@ POLL_INTERVAL_SEC = 60
 IDLE_SLEEP_SEC = 300
 # 收盘判定:15:00 收盘,留 5min 让 EOD 数据稳定
 _EOD_AFTER = time(15, 5)
+# 候选刷新时点:收盘后 15:35(等 Tushare 当日 EOD 数据稳定;plan §4.0 / Review 拍板)
+_CANDIDATE_AFTER = time(15, 35)
 
 
 def _is_trading_now(now: datetime) -> bool:
@@ -61,6 +63,11 @@ def _is_trading_now(now: datetime) -> bool:
 def _is_after_close(now: datetime) -> bool:
     """是否已过收盘(交易日且 >= 15:05)。"""
     return trading_window(now.date()) is not None and now.time() >= _EOD_AFTER
+
+
+def _is_after_candidate_window(now: datetime) -> bool:
+    """是否已过候选刷新时点(交易日且 >= 15:35)。"""
+    return trading_window(now.date()) is not None and now.time() >= _CANDIDATE_AFTER
 
 
 def _build_two_source_quotes(codes: List[str]) -> Dict[str, dict]:
@@ -270,6 +277,41 @@ def run_eod_tick(
     return {"summaries": summaries, "pushes": pushes}
 
 
+def run_candidate_refresh(
+    *,
+    now: datetime,
+    pipeline_fn: Optional[Callable[[str], object]] = None,
+    db_path: Optional[str] = None,
+) -> Dict[str, object]:
+    """EOD 后算当日候选并 upsert candidates 表(阶段2 D2)。
+
+    每交易日一次(调用方用 last_candidate_date 防重)。pipeline 拉全市场 → 粗筛排序
+    → 落表。无 token/拉取失败 → degraded,count=0,不崩(降级契约)。
+    失败吞异常不掀翻轮询(调用方 monitor_loop 已有 try,这里再兜一层)。
+
+    pipeline_fn 可注入(测试免联网):签名 (basis_yyyymmdd) -> (rows, degraded, reason, trade_date_disp)。
+    """
+    pipeline_fn = pipeline_fn or _default_pipeline_fn
+    # 候选 EOD 基准日:今天是交易日用今天(已过 15:35),否则上一交易日。
+    from app.calendar.trading_calendar import prev_trading_day as _prev, is_trading_day as _istd
+    today = now.date()
+    basis_d = today if _istd(today) else _prev(today)
+    basis = basis_d.strftime("%Y%m%d")
+    try:
+        rows, degraded, reason, td = pipeline_fn(basis)
+    except Exception as e:
+        logger.warning("候选刷新 pipeline 异常(已吞): %s", e)
+        return {"count": 0, "degraded": True, "trade_date": ""}
+    store.upsert_candidates(td, rows, db_path=db_path)
+    logger.info("候选刷新落表 %d 条(trade_date=%s, degraded=%s)", len(rows), td, degraded)
+    return {"count": len(rows), "degraded": degraded, "trade_date": td}
+
+
+def _default_pipeline_fn(basis_yyyymmdd: str):
+    from app.screen.pipeline import run_pipeline
+    return run_pipeline(basis_yyyymmdd)
+
+
 def _default_quotes_fn(codes: List[str]) -> Dict[str, object]:
     from app.data.realtime import get_realtime_quotes
     return get_realtime_quotes(codes)
@@ -282,6 +324,7 @@ async def monitor_loop(esc: EscalationManager, stop_event: asyncio.Event) -> Non
     收盘后(每交易日一次)跑 run_eod_tick。
     """
     last_eod_date: Optional[date] = None
+    last_candidate_date: Optional[date] = None
     logger.info("监控轮询启动(单 unit;sandbox=%s)", settings.APNS_USE_SANDBOX)
     while not stop_event.is_set():
         now = datetime.now()
@@ -295,6 +338,10 @@ async def monitor_loop(esc: EscalationManager, stop_event: asyncio.Event) -> Non
                 sleep_for = IDLE_SLEEP_SEC
             else:
                 sleep_for = IDLE_SLEEP_SEC
+            # 候选刷新(>=15:35,每交易日一次,与 EOD 推送解耦;失败吞异常不掀翻轮询)
+            if _is_after_candidate_window(now) and last_candidate_date != now.date():
+                await asyncio.to_thread(run_candidate_refresh, now=now)
+                last_candidate_date = now.date()
         except Exception as e:  # 轮询任何异常不得掀翻常驻协程
             logger.exception("监控轮询单轮异常(已吞,继续): %s", e)
             sleep_for = POLL_INTERVAL_SEC

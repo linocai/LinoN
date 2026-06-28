@@ -97,6 +97,25 @@ CREATE TABLE IF NOT EXISTS device_tokens (
     platform   TEXT    NOT NULL DEFAULT 'ios',
     created_at TEXT    NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS candidates (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_date   TEXT    NOT NULL,            -- EOD 计算基准 'YYYY-MM-DD'
+    rank         INTEGER NOT NULL,            -- 机械排序名次(1 起)
+    code         TEXT    NOT NULL,
+    name         TEXT    NOT NULL,
+    sector       TEXT,                        -- 板块(免费板块归类/占位)
+    tag          TEXT,                        -- 标签
+    price        REAL,                        -- EOD 收盘价
+    chg          TEXT,                        -- 涨跌幅展示串
+    vol_multiple TEXT,                        -- 放量倍数 "2.8x"
+    vol_pct      INTEGER,                     -- 放量进度 0-100
+    flow         TEXT,                        -- 主力净流入展示串
+    turnover     TEXT,                        -- 换手展示串
+    warn         TEXT,                        -- 高位警告降级(≥50% 时非空)
+    created_at   TEXT    NOT NULL,
+    UNIQUE(trade_date, code)
+);
 """
 
 
@@ -417,3 +436,111 @@ def list_device_tokens(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
     finally:
         conn.close()
     return [dict(r) for r in rows]
+
+
+# —— 候选缓存表(阶段2 D1/D2:EOD 算一次候选落表,端点读缓存)——————————
+
+# Candidate dict → candidates 列名映射(rows 用 pipeline 产的 camelCase 键)。
+_CANDIDATE_KEYS = (
+    ("rank", "rank"),
+    ("name", "name"),
+    ("code", "code"),
+    ("sector", "sector"),
+    ("tag", "tag"),
+    ("price", "price"),
+    ("chg", "chg"),
+    ("vol_multiple", "volMultiple"),
+    ("vol_pct", "volPct"),
+    ("flow", "flow"),
+    ("turnover", "turnover"),
+    ("warn", "warn"),
+)
+
+
+def upsert_candidates(
+    trade_date: str, rows: List[Dict[str, Any]], db_path: Optional[str] = None
+) -> int:
+    """整体替换某 trade_date 的候选缓存(先删该日旧行,再插入新行)。
+
+    rows = pipeline 产的 Candidate dict 列表(camelCase 键:volMultiple/volPct…)。
+    trade_date 'YYYY-MM-DD'。返回写入行数。空 rows → 清掉该日缓存(返回 0)。
+    """
+    conn = get_connection(db_path)
+    try:
+        conn.execute("DELETE FROM candidates WHERE trade_date = ?", (trade_date,))
+        n = 0
+        now = _now()
+        for r in rows:
+            conn.execute(
+                """INSERT INTO candidates
+                   (trade_date, rank, code, name, sector, tag, price, chg,
+                    vol_multiple, vol_pct, flow, turnover, warn, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    trade_date,
+                    int(r.get("rank", 0)),
+                    str(r.get("code", "")),
+                    str(r.get("name", "")),
+                    r.get("sector"),
+                    r.get("tag"),
+                    r.get("price"),
+                    r.get("chg"),
+                    r.get("volMultiple"),
+                    r.get("volPct"),
+                    r.get("flow"),
+                    r.get("turnover"),
+                    r.get("warn"),
+                    now,
+                ),
+            )
+            n += 1
+        conn.commit()
+        return n
+    finally:
+        conn.close()
+
+
+def list_candidates(trade_date: str, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """读某 trade_date 的候选缓存,按 rank 升序。返回 Candidate 形状 dict 列表
+    (camelCase 键,对齐 Models.swift / plan §4.3;warn 为 None 时省略键)。
+    """
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM candidates WHERE trade_date = ? ORDER BY rank",
+            (trade_date,),
+        ).fetchall()
+    finally:
+        conn.close()
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        cand = {
+            "rank": d["rank"],
+            "name": d["name"],
+            "code": d["code"],
+            "sector": d.get("sector") or "",
+            "tag": d.get("tag") or "",
+            "price": d.get("price") or 0.0,
+            "chg": d.get("chg") or "",
+            "volMultiple": d.get("vol_multiple") or "",
+            "volPct": d.get("vol_pct") or 0,
+            "flow": d.get("flow") or "",
+            "turnover": d.get("turnover") or "",
+        }
+        if d.get("warn"):
+            cand["warn"] = d["warn"]
+        out.append(cand)
+    return out
+
+
+def latest_candidate_date(db_path: Optional[str] = None) -> Optional[str]:
+    """最近一次有候选缓存的 trade_date('YYYY-MM-DD');无则 None。"""
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT trade_date FROM candidates ORDER BY trade_date DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    return row["trade_date"] if row else None

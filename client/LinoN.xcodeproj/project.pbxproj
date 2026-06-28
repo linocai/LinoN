@@ -10,6 +10,8 @@
 		03A78FBDEEDD433A124655ED /* HoldingDayPips.swift in Sources */ = {isa = PBXBuildFile; fileRef = 179472D2E17A2E57C8A84D6A /* HoldingDayPips.swift */; };
 		1724987046E278BDEBF17F22 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 043186D7ECC9EB58CD89BFE9 /* AppModel.swift */; };
 		2BAF80FB4990852C4DEBAF30 /* HoldingCardModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 963822D25C21FAE170471799 /* HoldingCardModel.swift */; };
+		34DF23A9102F30CB91BA5551 /* CandidatesAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B023CF099F6D9991C86BDB5 /* CandidatesAnalysisTests.swift */; };
+		3EFDFC95CD5CBF6206F924BA /* SnapshotRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87854D8BA6C91A2E4C326EF6 /* SnapshotRenderTests.swift */; };
 		46DF63BE2A610856E1B17DD0 /* EntrySheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = B623BBB02515ECC2746699ED /* EntrySheets.swift */; };
 		4ABC82F197AF7D0D423F19E7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3C2748CC1D85BC96ADD30CDB /* Assets.xcassets */; };
 		54106172460A25564424A74A /* AppModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3D5C872E69CCE30B16984D2 /* AppModelTests.swift */; };
@@ -19,6 +21,7 @@
 		7859D1E2930B9AD490D3A3EE /* SignatureFormulaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8736D47CD5308B0DA24A631E /* SignatureFormulaTests.swift */; };
 		79B3A5D992D1206DBA31E7F6 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 601D8AD25F441E854DBFEC84 /* TodayView.swift */; };
 		830731A1866F571653649F18 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A470D7862F2D67A2D7703862 /* Models.swift */; };
+		84B549E3FC11F05D44AD17A4 /* CandidatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37E5F33C3E94095C90D09E06 /* CandidatesView.swift */; };
 		88B9D534F87677E0EEDF0721 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD7144235C996B425A3BCF86 /* SettingsView.swift */; };
 		909EC1BB4D2ADBE225D2EB21 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2593EE0B3AB4692D5C6CE89 /* DesignTokens.swift */; };
 		9463FA097046366B460FC2A7 /* PushManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 158F345C767ED97569FADBED /* PushManager.swift */; };
@@ -26,6 +29,7 @@
 		C0AC34EF8977C64DF25CCC6B /* StaticTradingCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73AFF73F74AA552BB1E9D48 /* StaticTradingCalendar.swift */; };
 		C6E08542D7CB8104356CE4B7 /* KPIViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB41E94390C1F4A4E8330A67 /* KPIViews.swift */; };
 		C7D77DBA240C72F2CAFECA98 /* LinoNApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0090EFBF46BED6DBC0006FDF /* LinoNApp.swift */; };
+		D6D609787D924747D4104B85 /* AnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E280AC2F893EA07BBF62B289 /* AnalysisView.swift */; };
 		DD307098DAD19FFC64AEB96F /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5039C9FEBD169B927A8B36A8 /* APIClient.swift */; };
 		E7667598074829BBD94D52CC /* SharedUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DBE4BBD19BDB97C26D4E0A8 /* SharedUI.swift */; };
 /* End PBXBuildFile section */
@@ -48,6 +52,8 @@
 		158F345C767ED97569FADBED /* PushManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushManager.swift; sourceTree = "<group>"; };
 		179472D2E17A2E57C8A84D6A /* HoldingDayPips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoldingDayPips.swift; sourceTree = "<group>"; };
 		31C1C0D7C180D4ACE93AB772 /* LinoNTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = LinoNTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		37E5F33C3E94095C90D09E06 /* CandidatesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidatesView.swift; sourceTree = "<group>"; };
+		3B023CF099F6D9991C86BDB5 /* CandidatesAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidatesAnalysisTests.swift; sourceTree = "<group>"; };
 		3C2748CC1D85BC96ADD30CDB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		43126A056B946F5A0BD68754 /* DualLineTrack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DualLineTrack.swift; sourceTree = "<group>"; };
 		48936E7D5F3B0A6449569847 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -55,6 +61,7 @@
 		5039C9FEBD169B927A8B36A8 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		601D8AD25F441E854DBFEC84 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
 		8736D47CD5308B0DA24A631E /* SignatureFormulaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignatureFormulaTests.swift; sourceTree = "<group>"; };
+		87854D8BA6C91A2E4C326EF6 /* SnapshotRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotRenderTests.swift; sourceTree = "<group>"; };
 		88AA21D75633F0446DA30DBD /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		92F056BB9D43BA38337CEC49 /* LinoN.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LinoN.entitlements; sourceTree = "<group>"; };
 		963822D25C21FAE170471799 /* HoldingCardModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoldingCardModel.swift; sourceTree = "<group>"; };
@@ -63,6 +70,7 @@
 		B623BBB02515ECC2746699ED /* EntrySheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntrySheets.swift; sourceTree = "<group>"; };
 		BD7144235C996B425A3BCF86 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E2593EE0B3AB4692D5C6CE89 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
+		E280AC2F893EA07BBF62B289 /* AnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisView.swift; sourceTree = "<group>"; };
 		E3D5C872E69CCE30B16984D2 /* AppModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModelTests.swift; sourceTree = "<group>"; };
 		F640F9DFB94F40CD8FEC7CE2 /* HoldingCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoldingCard.swift; sourceTree = "<group>"; };
 		F73AFF73F74AA552BB1E9D48 /* StaticTradingCalendar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaticTradingCalendar.swift; sourceTree = "<group>"; };
@@ -145,7 +153,9 @@
 			isa = PBXGroup;
 			children = (
 				E3D5C872E69CCE30B16984D2 /* AppModelTests.swift */,
+				3B023CF099F6D9991C86BDB5 /* CandidatesAnalysisTests.swift */,
 				8736D47CD5308B0DA24A631E /* SignatureFormulaTests.swift */,
+				87854D8BA6C91A2E4C326EF6 /* SnapshotRenderTests.swift */,
 			);
 			path = LinoNTests;
 			sourceTree = "<group>";
@@ -153,6 +163,8 @@
 		8DCABDFA8D18E5C7FFE452E2 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				E280AC2F893EA07BBF62B289 /* AnalysisView.swift */,
+				37E5F33C3E94095C90D09E06 /* CandidatesView.swift */,
 				B623BBB02515ECC2746699ED /* EntrySheets.swift */,
 				F640F9DFB94F40CD8FEC7CE2 /* HoldingCard.swift */,
 				963822D25C21FAE170471799 /* HoldingCardModel.swift */,
@@ -275,8 +287,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				DD307098DAD19FFC64AEB96F /* APIClient.swift in Sources */,
+				D6D609787D924747D4104B85 /* AnalysisView.swift in Sources */,
 				687C97670A0B2E6188B4B301 /* AppConfig.swift in Sources */,
 				1724987046E278BDEBF17F22 /* AppModel.swift in Sources */,
+				84B549E3FC11F05D44AD17A4 /* CandidatesView.swift in Sources */,
 				909EC1BB4D2ADBE225D2EB21 /* DesignTokens.swift in Sources */,
 				54A2E33C6EC9E3820A49BCF5 /* DualLineTrack.swift in Sources */,
 				46DF63BE2A610856E1B17DD0 /* EntrySheets.swift in Sources */,
@@ -300,7 +314,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				54106172460A25564424A74A /* AppModelTests.swift in Sources */,
+				34DF23A9102F30CB91BA5551 /* CandidatesAnalysisTests.swift in Sources */,
 				7859D1E2930B9AD490D3A3EE /* SignatureFormulaTests.swift in Sources */,
+				3EFDFC95CD5CBF6206F924BA /* SnapshotRenderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

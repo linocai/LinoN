@@ -258,3 +258,48 @@ def test_trading_time_helpers():
     # 收盘后判定
     assert loop_mod._is_after_close(datetime(2026, 6, 23, 15, 10)) is True
     assert loop_mod._is_after_close(datetime(2026, 6, 23, 14, 0)) is False
+
+
+# —— D2:候选刷新 tick(EOD 后落表,注入假 pipeline 免联网)————————————
+
+def test_candidate_window_helper():
+    # 15:35 后才刷新候选(早于 EOD 推送 15:05)
+    assert loop_mod._is_after_candidate_window(datetime(2026, 6, 23, 15, 40)) is True
+    assert loop_mod._is_after_candidate_window(datetime(2026, 6, 23, 15, 10)) is False
+    assert loop_mod._is_after_candidate_window(datetime(2026, 6, 27, 16, 0)) is False  # 周六
+
+
+def test_run_candidate_refresh_upserts(db):
+    """注入假 pipeline → run_candidate_refresh 落表一次。"""
+    rows = [{
+        "rank": 1, "name": "兆易创新", "code": "603986", "sector": "半导体",
+        "tag": "放量突破", "price": 100.0, "chg": "+5.00%", "volMultiple": "2.8x",
+        "volPct": 90, "flow": "+1.20亿", "turnover": "4.6%", "warn": None,
+    }]
+    res = loop_mod.run_candidate_refresh(
+        now=datetime(2026, 6, 23, 15, 40),
+        pipeline_fn=lambda basis: (rows, False, "ok", "2026-06-23"),
+        db_path=db,
+    )
+    assert res["count"] == 1 and res["degraded"] is False
+    cached = store.list_candidates("2026-06-23", db_path=db)
+    assert len(cached) == 1 and cached[0]["code"] == "603986"
+
+
+def test_run_candidate_refresh_degraded_safe(db):
+    """pipeline degraded → 落空表,不崩。"""
+    res = loop_mod.run_candidate_refresh(
+        now=datetime(2026, 6, 23, 15, 40),
+        pipeline_fn=lambda basis: ([], True, "token 缺失", "2026-06-23"),
+        db_path=db,
+    )
+    assert res["count"] == 0 and res["degraded"] is True
+
+
+def test_run_candidate_refresh_exception_safe(db):
+    """pipeline 抛异常被吞,不掀翻。"""
+    def _boom(basis):
+        raise RuntimeError("network down")
+    res = loop_mod.run_candidate_refresh(now=datetime(2026, 6, 23, 15, 40),
+                                         pipeline_fn=_boom, db_path=db)
+    assert res["count"] == 0 and res["degraded"] is True

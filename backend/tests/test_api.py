@@ -198,3 +198,40 @@ def test_ack_endpoint(client):
 def test_ack_invalid_action_422(client):
     r = client.post("/api/v1/alerts/600000/ack", json={"action": "nope"}, headers=AUTH)
     assert r.status_code == 422
+
+
+# —— D5:buy_date 周末/节假日改取下一交易日(reviewer 🔵#1)————————————————
+
+@pytest.mark.parametrize("today_iso,expected", [
+    # 工作日盘中录入 → 当天(2026-06-23 周二交易日)
+    ("2026-06-23", "2026-06-23"),
+    # 周末录入 → 下一交易日(2026-06-27 周六 → 06-29 周一)
+    ("2026-06-27", "2026-06-29"),
+    # 节假日录入 → 下一交易日(2026-10-01 国庆 → 10-08 节后首个交易日)
+    ("2026-10-01", "2026-10-08"),
+])
+def test_current_trade_date_next_on_nontrading(monkeypatch, today_iso, expected):
+    """周末/节假日录入 buy_date 取下一交易日(不再上一交易日);交易日取当天。"""
+    import importlib
+    from datetime import date as _date
+
+    app_mod = importlib.import_module("app.api.app")
+    y, m, d = (int(x) for x in today_iso.split("-"))
+    frozen = _date(y, m, d)
+
+    class _FixedDate(_date):
+        @classmethod
+        def today(cls):
+            return frozen
+
+    # _current_trade_date 内 `from datetime import date`,patch datetime.date
+    monkeypatch.setattr("datetime.date", _FixedDate)
+    assert app_mod._current_trade_date() == expected
+
+
+def test_open_buy_date_present(client):
+    """开仓回包带 buy_date(供客户端确认;契约不变)。"""
+    r = client.post("/api/v1/positions/open", json={
+        "code": "600000", "buy_price": 10.0, "qty": 100, "entry_reason": "x",
+    }, headers=AUTH)
+    assert r.status_code == 200 and "buy_date" in r.json()

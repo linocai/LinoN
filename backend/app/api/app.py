@@ -16,6 +16,9 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from app.api.deps import require_api_token_ready, require_token
 from app.api.schemas import (
     AlertAck,
+    CandidatesList,
+    CandidatesRefreshOut,
+    CoachRequest,
     DeviceRegister,
     PositionClose,
     PositionOpen,
@@ -24,6 +27,7 @@ from app.api.schemas import (
 )
 from app.calendar.trading_calendar import (
     count_holding_trade_days,
+    next_trading_day,
     prev_trading_day,
     is_trading_day,
 )
@@ -41,10 +45,16 @@ ENABLE_MONITOR = True
 
 
 def _current_trade_date() -> str:
-    """当前交易日 'YYYY-MM-DD':今天是交易日用今天,否则用上一交易日。"""
+    """开仓 buy_date 'YYYY-MM-DD'(D 计数基准 D1)。
+
+    D5 修 reviewer 🔵#1:今天是交易日 → 今天;周末/节假日录入 → 取**下一**交易日
+    (next_trading_day),不再取上一交易日——否则 D 计数会从已收盘的上一交易日提前起算,
+    把周末当 D1 之后的时间,导致 D4 强平提前。不破 should_force_close 的 count==4 契约
+    (只改 buy_date 落点,计数语义不变)。
+    """
     from datetime import date
     today = date.today()
-    d = today if is_trading_day(today) else prev_trading_day(today)
+    d = today if is_trading_day(today) else next_trading_day(today)
     return d.strftime("%Y-%m-%d")
 
 
@@ -222,6 +232,191 @@ def ack_alert(code: str, body: AlertAck) -> dict:
     esc: EscalationManager = app.state.escalation
     n = esc.ack(code, body.action)
     return {"ok": True, "stopped": n}
+
+
+# —— D2 候选列表(读缓存 + 运行时按 free_slots 截断)——————————————————————
+
+@app.get(f"{API_PREFIX}/candidates", dependencies=[Depends(require_token)])
+def list_candidates() -> CandidatesList:
+    """读 candidates 缓存表最新 trade_date,按 5×free_slots 运行时再截断。
+
+    满仓(free_slots=0)→ 空列表(闭门);无缓存/无 token → degraded:true 空列表。
+    candidates 形状对齐 Models.swift Candidate(analysis 在列表里省略,深判 on-demand)。
+    """
+    free = max(0, store.MAX_HOLDINGS - store.holding_count())
+    td = store.latest_candidate_date()
+    if td is None:
+        # 无缓存:degraded(可能 token 缺失 EOD 未算,或盘前首日)。HTTP 仍 200。
+        reason = "no_cache" if settings.has_tushare_token else "no_tushare_token"
+        return CandidatesList(
+            candidates=[], free_slots=free, trade_date="", degraded=True, reason=reason,
+        )
+    all_rows = store.list_candidates(td)
+    limit = 5 * free   # 截断公式(满仓 0 闭门)
+    shown = all_rows[:limit] if limit > 0 else []
+    return CandidatesList(
+        candidates=shown, free_slots=free, trade_date=td, degraded=False,
+    )
+
+
+# —— D2 强制重算候选(鉴权)——————————————————————————————————————————
+
+@app.post(f"{API_PREFIX}/candidates/refresh", dependencies=[Depends(require_token)])
+def refresh_candidates() -> CandidatesRefreshOut:
+    """强制重算当日候选并 upsert。返回 {ok, trade_date, count, degraded}。
+
+    无 token/拉取失败 → degraded:true,count=0,不崩(沿降级契约)。
+    """
+    count, td, degraded = _recompute_candidates()
+    return CandidatesRefreshOut(ok=True, trade_date=td, count=count, degraded=degraded)
+
+
+# —— 候选重算编排(端点 + EOD tick 共用)————————————————————————————————
+
+def _candidate_basis_date() -> str:
+    """候选 EOD 计算基准交易日 'YYYYMMDD'。
+
+    今天是交易日且已过收盘窗口 → 今天;否则取上一交易日(Tushare EOD 数据口径)。
+    注:Tushare 2000 积分实际数据可能滞后,_recompute 内 pipeline 会按此基准日拉,
+    拉不到该日则 fetch 返回失败 → degraded(不崩)。
+    """
+    from datetime import date
+    today = date.today()
+    d = today if is_trading_day(today) else prev_trading_day(today)
+    return d.strftime("%Y%m%d")
+
+
+def _recompute_candidates() -> tuple:
+    """拉全市场 → 粗筛排序 → upsert candidates 表。返回 (count, trade_date_disp, degraded)。
+
+    可注入测试替身:模块级 _pipeline_fn(避免单测联网)。
+    """
+    basis = _candidate_basis_date()
+    try:
+        rows, degraded, _reason, td = _pipeline_fn(basis)
+    except Exception:
+        logger.warning("候选重算异常(已吞)", exc_info=True)
+        return 0, _disp_date(basis), True
+    # td 为展示串 'YYYY-MM-DD'(pipeline 产);degraded 时 rows 为空
+    store.upsert_candidates(td, rows)
+    return len(rows), td, degraded
+
+
+def _default_pipeline_fn(basis_yyyymmdd: str):
+    from app.screen.pipeline import run_pipeline
+    return run_pipeline(basis_yyyymmdd)
+
+
+# 可注入测试替身(避免单测联网/真拉 Tushare)。
+_pipeline_fn = _default_pipeline_fn
+
+
+def _disp_date(yyyymmdd: str) -> str:
+    s = str(yyyymmdd)
+    if len(s) == 8 and s.isdigit():
+        return f"{s[0:4]}-{s[4:6]}-{s[6:8]}"
+    return s
+
+
+# —— D4 on-demand 深判(候选)——————————————————————————————————————
+
+@app.post(f"{API_PREFIX}/candidates/{{code}}/analyze",
+          dependencies=[Depends(require_token)])
+def analyze_candidate(code: str) -> dict:
+    """on-demand 对候选深判,返回 {ok, code, analysis: DeepAnalysis, fund_asof}。
+
+    name/sector 优先从最新候选缓存补,缺则用行业映射/code 兜底。
+    上游(Tushare/DeepSeek)失败 → 深判返回降级占位卡(verdict=观望),HTTP 仍 200。
+    """
+    bare = _bare_code(code)
+    name, sector = _resolve_candidate_meta(bare)
+    result = _analyze_fn(bare, name, sector, "candidate", None, None, None)
+    return {
+        "ok": True,
+        "code": bare,
+        "analysis": result["analysis"],
+        "fund_asof": result["fund_asof"],
+    }
+
+
+# —— D4 中间地带 B 剂量(在持仓二元建议)————————————————————————————————
+
+@app.post(f"{API_PREFIX}/positions/{{position_id}}/coach",
+          dependencies=[Depends(require_token)])
+def coach_position(position_id: int, body: CoachRequest) -> dict:
+    """对在持仓给中间地带二元建议(拿/清)。非在持仓 → 404 not_holding。
+
+    最看重量能萎缩 + 主力资金还在不在(方法论在 system prompt)。返回
+    {ok, advice:"拿"|"清", reason, analysis: DeepAnalysis, fund_asof}。
+    上游失败 → 降级占位卡 + advice 由 verdict 派生(观望→拿),HTTP 仍 200。
+    """
+    from datetime import date
+    from app.llm.analyze import coach_advice_from_analysis
+
+    pos = store.get_position(position_id)
+    if pos is None or pos.get("status") != "holding":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"ok": False, "reason": "not_holding"},
+        )
+
+    code = pos["code"]
+    # 当前盈亏%(按需拉一拍实时价;拉不到则 None,深判仍可做)
+    pnl_pct = None
+    prices = _resolve_prices([code])
+    price = prices.get(code)
+    if price and pos["buy_price"]:
+        pnl_pct = round((price - pos["buy_price"]) / pos["buy_price"] * 100, 2)
+    trade_day = count_holding_trade_days(pos["buy_date"], date.today())
+
+    result = _analyze_fn(
+        code, pos.get("name", code), "", "coach", pnl_pct, trade_day, body.question,
+    )
+    analysis = result["analysis"]
+    advice = coach_advice_from_analysis(analysis)
+    reason = analysis.get("plan", "")
+    return {
+        "ok": True,
+        "advice": advice,
+        "reason": reason,
+        "analysis": analysis,
+        "fund_asof": result["fund_asof"],
+    }
+
+
+# —— 深判编排桥(可注入测试替身)————————————————————————————————————————
+
+def _bare_code(code: str) -> str:
+    import re
+    return re.sub(r"\D", "", code or "")[:6]
+
+
+def _resolve_candidate_meta(code: str) -> tuple:
+    """从最新候选缓存补 (name, sector);缺则行业映射/code 兜底。"""
+    td = store.latest_candidate_date()
+    if td:
+        for c in store.list_candidates(td):
+            if c["code"] == code:
+                return c.get("name") or code, c.get("sector") or ""
+    # 兜底:行业映射
+    try:
+        from app.screen.fetch import name_of, industry_of, load_industry_map
+        load_industry_map()
+        return name_of(code) or code, industry_of(code) or ""
+    except Exception:
+        return code, ""
+
+
+def _default_analyze_fn(code, name, sector, mode, pnl_pct, trade_day, question):
+    from app.llm.analyze import analyze_stock
+    return analyze_stock(
+        code, name, sector, mode=mode,
+        pnl_pct=pnl_pct, trade_day=trade_day, question=question,
+    )
+
+
+# 可注入测试替身(避免单测联网/真调 DeepSeek+Tushare)。
+_analyze_fn = _default_analyze_fn
 
 
 # —— 内部工具 ————————————————————————————————————————————————————————

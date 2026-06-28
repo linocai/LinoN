@@ -26,7 +26,7 @@ struct RootView: View {
         TabView(selection: Binding(get: { model.view }, set: { model.view = $0 })) {
             tabContent(.today) { TodayViewIOS(model: model) }
                 .tabItem { Label("今日", systemImage: "circle.circle") }.tag(AppView.today)
-            tabContent(.candidates) { candidatesPlaceholder }
+            tabContent(.candidates) { CandidatesViewIOS(model: model) }
                 .tabItem { Label("候选", systemImage: "list.bullet") }.tag(AppView.candidates)
             tabContent(.review) { reviewPlaceholder }
                 .tabItem { Label("复盘", systemImage: "chart.bar") }.tag(AppView.review)
@@ -38,6 +38,10 @@ struct RootView: View {
         .sheet(isPresented: Binding(get: { model.modal != nil },
                                     set: { if !$0 { model.dismissModal() } })) {
             EntrySheetIOS(model: model)
+        }
+        .fullScreenCover(isPresented: Binding(get: { model.inAnalysis },
+                                              set: { if !$0 { model.backFromAnalysis() } })) {
+            AnalysisView(model: model, compact: true)
         }
         .task { model.bind(config: config); await model.refresh() }
     }
@@ -54,8 +58,14 @@ struct RootView: View {
         HStack(spacing: 0) {
             sidebar.frame(width: 240)
             Divider().overlay(LN.hairline)
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Group {
+                if model.inAnalysis {
+                    AnalysisView(model: model, compact: false)
+                } else {
+                    content
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 920, minHeight: 600)
         .overlay(alignment: .bottom) { toastOverlay.padding(.bottom, 24) }
@@ -81,7 +91,7 @@ struct RootView: View {
                 .padding(.horizontal, 16).padding(.bottom, 7)
 
             navItem(.today, "今日持仓", "circle.circle", badge: "\(model.holdings.count)")
-            navItem(.candidates, "候选列表", "list.bullet", badge: "0")
+            navItem(.candidates, "候选列表", "list.bullet", badge: "\(model.shownCandidates.count)")
             navItem(.review, "周复盘", "chart.bar", badge: "待", badgeColor: LN.amber)
             navItem(.memory, "记忆", "bookmark")
 
@@ -109,7 +119,11 @@ struct RootView: View {
     private func navItem(_ v: AppView, _ title: String, _ icon: String,
                          badge: String? = nil, badgeColor: Color = LN.textSecondary) -> some View {
         let active = model.view == v
-        return Button(action: { model.view = v }) {
+        return Button(action: {
+            // 侧栏切 Tab 时退出深析全屏,避免 view 选中态与内容区(AnalysisView)失同步。
+            if model.inAnalysis { model.backFromAnalysis() }
+            model.view = v
+        }) {
             HStack(spacing: 9) {
                 Image(systemName: icon).font(.system(size: 14, weight: .medium))
                     .foregroundStyle(active ? LN.accent : LN.textSecondary)
@@ -137,7 +151,7 @@ struct RootView: View {
     private var content: some View {
         switch model.view {
         case .today: TodayViewMac(model: model)
-        case .candidates: candidatesPlaceholder
+        case .candidates: CandidatesViewMac(model: model)
         case .review: reviewPlaceholder
         case .memory: memoryPlaceholder
         }
@@ -153,13 +167,8 @@ struct RootView: View {
     }
     #endif
 
-    // MARK: - 占位视图(阶段2/3)
+    // MARK: - 占位视图(阶段3)
 
-    private var candidatesPlaceholder: some View {
-        PlaceholderView(title: "候选列表 · 阶段2",
-                        subtitle: "EOD 机械排序 + on-demand 深析。\n本期为导航占位,阶段2 重建。",
-                        systemImage: "list.bullet.rectangle")
-    }
     private var reviewPlaceholder: some View {
         PlaceholderView(title: "周复盘 · 阶段3",
                         subtitle: "纪律评分 + 执行率趋势 + 每笔点评。\n本期为导航占位,阶段3 重建。",

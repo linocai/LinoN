@@ -83,7 +83,8 @@ RSYNC_OPTS=(-az --delete
   --exclude '.venv/'
   --exclude '__pycache__/'
   --exclude '.pytest_cache/'
-  --exclude 'data/'          # SQLite 落盘不传(远端独立库)
+  --exclude '/data/'         # SQLite 落盘不传(远端独立库)。【必须前导斜杠锚定根】否则
+                             # 无锚 'data/' 会匹配任意层级 → 误排 app/data/(realtime+tushare_client)
   --exclude '.env'           # 密钥不随同步覆盖(远端 .env 独立维护)
   --exclude '*.p8'           # APNs 私钥:远端独立维护,绝不被 --delete 清掉
   --exclude 'client'         # 客户端不进后端部署

@@ -24,6 +24,20 @@ enum AppView: String, CaseIterable, Identifiable {
 
 enum ModalKind: Equatable { case open, close }
 
+/// 深析模式:候选深析 / 持仓教练对话。
+enum ChatMode: Equatable { case analyze, coach }
+
+/// 深析全屏顶部上下文条(候选 or 持仓)。
+struct AnalysisContext: Equatable {
+    var name: String
+    var code: String
+    var price: Double
+    var chg: String              // 展示串(候选:涨跌幅;持仓:浮盈%)
+    var chgIsUp: Bool
+    var meta: String             // 候选:放量·主力·换手;持仓:成本·D几
+    var hint: String             // 右侧提示语
+}
+
 /// 开仓录入草稿(止损线只读派生,不在 form 内手填)。
 struct EntryForm {
     var code = ""
@@ -63,11 +77,29 @@ final class AppModel {
     var view: AppView = .today
     var selectedCode: String? = nil
 
-    // —— 真数据(本期只接 holdings)——
+    // —— 真数据 ——
     var holdings: [Position] = []
     var freeSlots: Int = 3
     var isLoading = false
     var loadError: String? = nil
+
+    // —— 阶段2:候选(GET /candidates;后端已按 5×free_slots 截断、满仓闭门返空)——
+    var candidates: [Candidate] = []
+    var candidatesTradeDate: String = ""
+    var candidatesDegraded: Bool = false
+    var candidatesDegradedReason: String? = nil
+    var candidatesLoading = false
+
+    // —— 阶段2:深析/对话 thread(AnalysisView)——
+    var inAnalysis: Bool = false           // 是否在深析全屏(iOS push / macOS 覆盖内容区)
+    var chatMode: ChatMode = .analyze
+    var thread: [ChatMessage] = []
+    var composer: String = ""
+    var analysisLoading = false
+    /// 当前深析上下文条用:候选(价/放量/主力)或持仓(成本/D几)。
+    var analysisContext: AnalysisContext? = nil
+    /// 当前深析卡的资金时序标注(显著展示;深判端点返回 fund_asof)。
+    var fundAsof: String = ""
 
     // —— 模态 / 录入 / toast ——
     var modal: ModalKind? = nil
@@ -134,8 +166,25 @@ final class AppModel {
 
     var hasFreeSlot: Bool { holdings.count < 3 }
 
+    /// 空仓位数 = max(0, 3 - 持仓数)。满仓 → 0(候选闭门)。
+    var openSlots: Int { max(0, 3 - holdings.count) }
+
+    /// 满仓闭门联动(plan E1):holdings>=3 → 空;否则取后端已截断列表的前 5×空仓位。
+    /// 后端已按 free_slots 运行时截断,此处再夹一层做客户端安全带 + 满仓即时闭门。
+    var shownCandidates: [Candidate] {
+        guard openSlots > 0 else { return [] }
+        return Array(candidates.prefix(5 * openSlots))
+    }
+
+    /// 候选已闭门(满仓)。
+    var candidatesClosed: Bool { openSlots == 0 }
+
     func holding(byCode code: String) -> Position? {
         holdings.first(where: { $0.code == code })
+    }
+
+    func candidate(byCode code: String) -> Candidate? {
+        candidates.first(where: { $0.code == code })
     }
 
     // MARK: - 网络动作
@@ -158,6 +207,8 @@ final class AppModel {
             self.loadError = error.localizedDescription
         }
         isLoading = false
+        // 候选随持仓数变化(满仓闭门 / 清仓重开);后端按 free_slots 截断,持仓变化后重拉。
+        await loadCandidates()
     }
 
     /// 开仓提交。成功 → 刷新 + toast;失败按 reason 弹提示。
@@ -218,6 +269,168 @@ final class AppModel {
         } catch {
             showToast("清仓失败:\(error.localizedDescription)", isError: true)
         }
+    }
+
+    // MARK: - 阶段2:候选
+
+    /// 拉候选(GET /candidates)。无 token/无缓存 → degraded 空列表(不弹错)。
+    func loadCandidates() async {
+        guard let client = clientProvider() else {
+            candidates = []; candidatesDegraded = true
+            candidatesDegradedReason = "no_client"; return
+        }
+        candidatesLoading = true
+        do {
+            let r = try await client.fetchCandidates()
+            self.candidates = r.candidates
+            self.candidatesTradeDate = r.tradeDate
+            self.candidatesDegraded = r.degraded
+            self.candidatesDegradedReason = r.reason
+        } catch let e as APIError {
+            // 候选拉取失败不弹错(降级语义);noToken 静默。
+            self.candidatesDegraded = true
+            self.candidatesDegradedReason = (e == .noToken) ? "no_token" : "error"
+            if case .noToken = e {} else { self.candidates = [] }
+        } catch {
+            self.candidatesDegraded = true
+            self.candidatesDegradedReason = "error"
+        }
+        candidatesLoading = false
+    }
+
+    // MARK: - 阶段2:深析 / 对话(AnalysisView)
+
+    /// 候选点深析 → 进全屏 + user 气泡 + on-demand 深判 analysis 卡。
+    func openAnalysis(code: String) async {
+        guard let c = candidate(byCode: code) else { return }
+        selectedCode = code
+        chatMode = .analyze
+        analysisContext = AnalysisContext(
+            name: c.name, code: c.code, price: c.price, chg: c.chg,
+            chgIsUp: !c.chg.contains("-"),   // 候选 chg 后端 ASCII '-';负跌涨幅勿染绿
+            meta: "放量 \(c.volMultiple) · 主力 \(c.flow) · 换手 \(c.turnover)",
+            hint: "深析 = on-demand,仅你挑中这只"
+        )
+        thread = [ChatMessage(role: .user, text: "分析一下\(c.name),这个位置能不能进?")]
+        inAnalysis = true
+        await runAnalyze(code: code)
+    }
+
+    private func runAnalyze(code: String) async {
+        guard let client = clientProvider() else {
+            appendAssistant("未配置后端连接,无法发起深判。去设置填 API Token。"); return
+        }
+        analysisLoading = true
+        do {
+            let r = try await client.analyzeCandidate(code: code)
+            self.fundAsof = r.fundAsof
+            thread.append(ChatMessage(role: .analysis, analysis: r.analysis))
+        } catch {
+            appendAssistant("深判失败:\((error as? APIError)?.errorDescription ?? error.localizedDescription)")
+        }
+        analysisLoading = false
+    }
+
+    /// 持仓「问教练」→ 进全屏。触损 → coach 卡;中间地带 → 持仓对话(走 coach 端点取建议)。
+    func openCoach(code: String) async {
+        guard let h = holding(byCode: code) else { return }
+        selectedCode = code
+        let hit = h.hitStop
+        chatMode = hit ? .coach : .analyze
+        let pnl = h.pnlPct
+        analysisContext = AnalysisContext(
+            name: h.name, code: h.code, price: h.price,
+            chg: LNFmt.signedPct(pnl), chgIsUp: pnl >= 0,
+            meta: "成本 \(LNFmt.price(h.buyPrice)) · 持仓 D\(holdingDay(h))",
+            hint: hit ? "反情绪教练 · 持仓对话" : "持仓中间地带 · 拿还是清"
+        )
+        let opener = hit ? "\(h.name)我想再拿一天,感觉明天会反弹…"
+                         : "\(h.name)现在卡在中间地带,我该拿还是清?"
+        thread = [ChatMessage(role: .user, text: opener)]
+        inAnalysis = true
+        await runCoach(id: h.id, hit: hit)
+    }
+
+    private func runCoach(id: Int, hit: Bool) async {
+        guard let client = clientProvider() else {
+            appendAssistant("未配置后端连接,无法请教练。去设置填 API Token。"); return
+        }
+        analysisLoading = true
+        do {
+            let r = try await client.coachPosition(id: id)
+            self.fundAsof = r.fundAsof
+            if hit {
+                // 触损 → coach 红橙卡(文案取后端 reason;复盘历史引用占位阶段3)。
+                thread.append(ChatMessage(role: .coach, text: r.reason, analysis: r.analysis))
+            } else {
+                // 中间地带 → 普通助手气泡(advice 拿/清 + 理由)。
+                let prefix = r.advice == "清" ? "建议清。" : "建议继续拿。"
+                thread.append(ChatMessage(role: .assistant, text: prefix + r.reason))
+            }
+        } catch let e as APIError {
+            appendAssistant("教练失败:\(e.errorDescription ?? "未知错误")")
+        } catch {
+            appendAssistant("教练失败:\(error.localizedDescription)")
+        }
+        analysisLoading = false
+    }
+
+    /// 发送 composer 文本(本期回固定文案;真问答接 LLM 留阶段3)。
+    func sendComposer() {
+        let t = composer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        thread.append(ChatMessage(role: .user, text: t))
+        composer = ""
+        appendAssistant("我先看量能和主力资金:只要缩量企稳、主力没撤,就还在买入逻辑里;真到 -5% 或第 4 日,按铁律走,别跟规则讲价。")
+    }
+
+    private func appendAssistant(_ text: String) {
+        thread.append(ChatMessage(role: .assistant, text: text))
+    }
+
+    /// 深析卡「全仓买入并录入」→ 退出深析,预填开仓 sheet。
+    /// iOS:fullScreenCover 与 .sheet 不能同一 runloop 交接(cover 关闭回调会 reset),
+    /// 故先关全屏、表单预填到 form,modal 推到下一 tick 再弹。
+    func buyFromAnalysis() {
+        guard let code = selectedCode, let c = candidate(byCode: code) else { return }
+        var f = EntryForm()
+        f.code = c.code
+        f.name = c.name
+        f.price = LNFmt.price(c.price)
+        f.reason = c.tag.isEmpty ? "平台突破" : c.tag
+        inAnalysis = false           // 关全屏(触发 backFromAnalysis 清 thread)
+        presentModalAfterCoverDismiss { [weak self] in
+            self?.form = f
+            self?.modal = .open
+        }
+    }
+
+    /// 教练「标记次日清仓」→ 退出深析,打开清仓 sheet(同上,推下一 tick)。
+    func markCloseFromAnalysis() {
+        guard let code = selectedCode, holding(byCode: code) != nil else { return }
+        inAnalysis = false
+        presentModalAfterCoverDismiss { [weak self] in
+            self?.openClose(code: code)
+        }
+    }
+
+    /// 在全屏 cover 关闭后的下一 runloop 呈现模态,避开 iOS cover↔sheet 同帧交接。
+    private func presentModalAfterCoverDismiss(_ present: @escaping () -> Void) {
+        #if os(iOS)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)   // 等 cover 退场动画 ~0.3s
+            present()
+        }
+        #else
+        present()   // macOS 无 fullScreenCover,内容区即时切换,直接呈现
+        #endif
+    }
+
+    func backFromAnalysis() {
+        inAnalysis = false
+        thread = []
+        analysisContext = nil
+        composer = ""
     }
 
     // MARK: - 模态控制

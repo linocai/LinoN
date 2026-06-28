@@ -27,7 +27,7 @@ struct TodayViewIOS: View {
                 }
                 ForEach(model.holdings) { pos in
                     HoldingCard(model: cardModel(pos), compact: true,
-                                onCoach: { model.selectedCode = pos.code; /* 阶段2 深析/教练 */ },
+                                onCoach: { Task { await model.openCoach(code: pos.code) } },
                                 onClose: { model.openClose(code: pos.code) })
                 }
                 if model.holdings.isEmpty {
@@ -111,7 +111,7 @@ struct TodayViewMac: View {
                     VStack(spacing: 12) {
                         ForEach(model.holdings) { pos in
                             HoldingCard(model: cardModel(pos), compact: false,
-                                        onCoach: { model.selectedCode = pos.code },
+                                        onCoach: { Task { await model.openCoach(code: pos.code) } },
                                         onClose: { model.openClose(code: pos.code) })
                         }
                     }

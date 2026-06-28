@@ -7,7 +7,7 @@ buy_date(+ 实时态 price/flow3d);【不含 stop_line】(客户端派生)。
 
 from __future__ import annotations
 
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -60,3 +60,27 @@ class PositionOut(BaseModel):
 class PositionsList(BaseModel):
     holdings: List[PositionOut]
     free_slots: int
+
+
+# —— 阶段2 D2/D4:候选 + 深判 —————————————————————————————————————————
+
+class CandidatesList(BaseModel):
+    """GET /candidates 响应(plan §4.3)。candidates 为 Candidate 形状 dict 列表
+    (analysis 在列表里省略,深判 on-demand);camelCase 键直接透传客户端。"""
+    candidates: List[Dict[str, Any]]
+    free_slots: int
+    trade_date: str
+    degraded: bool = False
+    reason: Optional[str] = None
+
+
+class CandidatesRefreshOut(BaseModel):
+    ok: bool
+    trade_date: str
+    count: int
+    degraded: bool = False
+
+
+class CoachRequest(BaseModel):
+    """POST /positions/{id}/coach 请求体(question 可选)。"""
+    question: Optional[str] = Field(default=None)

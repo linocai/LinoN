@@ -6,6 +6,7 @@ from app.data.tushare_client import (
     ts_daily,
     ts_daily_basic,
     ts_moneyflow,
+    ts_moneyflow_dc,
     ts_trade_cal,
 )
 
@@ -15,6 +16,7 @@ __all__ = [
     "get_realtime_quotes",
     "TushareResult",
     "ts_moneyflow",
+    "ts_moneyflow_dc",
     "ts_daily_basic",
     "ts_daily",
     "ts_trade_cal",

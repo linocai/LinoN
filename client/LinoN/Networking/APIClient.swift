@@ -79,9 +79,82 @@ struct DeviceRegisterRequest: Encodable {
     let platform: String   // "ios"
 }
 
+// MARK: - 阶段2:候选 / 深判 / 教练(plan §4.3)
+
+/// GET /candidates 响应(plan §4.3:满仓/无缓存 → degraded + 空列表)。
+struct CandidatesResult {
+    let candidates: [Candidate]
+    let freeSlots: Int
+    let tradeDate: String
+    let degraded: Bool
+    let reason: String?
+}
+
+/// 列表端点 candidates 形状(camelCase,逐字段对齐 Models.swift Candidate;
+/// 列表里 analysis 省略,深判 on-demand,故此处 analysis 解码为占位)。
+private struct CandidateListDTO: Decodable {
+    let rank: Int
+    let name: String
+    let code: String
+    let sector: String?
+    let tag: String?
+    let price: Double
+    let chg: String
+    let volMultiple: String
+    let volPct: Int
+    let flow: String
+    let turnover: String
+    let warn: String?
+}
+
+private struct CandidatesListResponse: Decodable {
+    let candidates: [CandidateListDTO]
+    let free_slots: Int
+    let trade_date: String
+    let degraded: Bool
+    let reason: String?
+}
+
+/// POST /candidates/{code}/analyze 响应(plan §4.3)。
+struct AnalyzeResult {
+    let code: String
+    let analysis: DeepAnalysis
+    let fundAsof: String
+}
+
+private struct AnalyzeResponse: Decodable {
+    let ok: Bool
+    let code: String
+    let analysis: DeepAnalysis
+    let fund_asof: String
+}
+
+/// POST /positions/{id}/coach 请求/响应(plan §4.3;advice 二元 拿/清)。
+struct CoachRequestBody: Encodable {
+    let question: String?
+}
+
+struct CoachResult {
+    let advice: String        // "拿" | "清"
+    let reason: String
+    let analysis: DeepAnalysis
+    let fundAsof: String
+}
+
+private struct CoachResponse: Decodable {
+    let ok: Bool
+    let advice: String
+    let reason: String
+    let analysis: DeepAnalysis
+    let fund_asof: String
+}
+
 struct AlertAckRequest: Encodable {
     let action: String     // "marked_close" | "dismissed"
 }
+
+/// 无请求体 POST 占位({})。
+struct EmptyBody: Encodable {}
 
 /// GET /positions 响应(对齐 backend PositionsList + Models.swift Position 形状)。
 private struct PositionsListResponse: Decodable {
@@ -163,6 +236,44 @@ actor APIClient {
         _ = try await post("/api/v1/alerts/\(code)/ack",
                            body: AlertAckRequest(action: action))
         return true
+    }
+
+    // —— 阶段2:拉候选(GET /candidates;后端已按 5×free_slots 运行时截断)——
+    func fetchCandidates() async throws -> CandidatesResult {
+        let data = try await get("/api/v1/candidates")
+        let resp = try JSONDecoder().decode(CandidatesListResponse.self, from: data)
+        // 列表 analysis 省略 → 填占位(深判 on-demand 时由 /analyze 覆盖)。
+        let neutral = AnalysisAxis(value: "—", tone: .neutral, text: "")
+        let placeholder = DeepAnalysis(form: neutral, fund: neutral, news: neutral,
+                                       verdict: .watch, plan: "")
+        let list = resp.candidates.map { dto -> Candidate in
+            Candidate(rank: dto.rank, name: dto.name, code: dto.code,
+                      sector: dto.sector ?? "", tag: dto.tag ?? "",
+                      price: dto.price, chg: dto.chg,
+                      volMultiple: dto.volMultiple, volPct: dto.volPct,
+                      flow: dto.flow, turnover: dto.turnover,
+                      warn: (dto.warn?.isEmpty == false) ? dto.warn : nil,
+                      analysis: placeholder)
+        }
+        return CandidatesResult(candidates: list, freeSlots: resp.free_slots,
+                                tradeDate: resp.trade_date, degraded: resp.degraded,
+                                reason: resp.reason)
+    }
+
+    // —— 阶段2:on-demand 深判候选(POST /candidates/{code}/analyze;上游失败仍 200 返占位卡)——
+    func analyzeCandidate(code: String) async throws -> AnalyzeResult {
+        let data = try await post("/api/v1/candidates/\(code)/analyze", body: EmptyBody())
+        let resp = try JSONDecoder().decode(AnalyzeResponse.self, from: data)
+        return AnalyzeResult(code: resp.code, analysis: resp.analysis, fundAsof: resp.fund_asof)
+    }
+
+    // —— 阶段2:中间地带教练(POST /positions/{id}/coach;非持仓 404)——
+    func coachPosition(id: Int, question: String? = nil) async throws -> CoachResult {
+        let data = try await post("/api/v1/positions/\(id)/coach",
+                                  body: CoachRequestBody(question: question))
+        let resp = try JSONDecoder().decode(CoachResponse.self, from: data)
+        return CoachResult(advice: resp.advice, reason: resp.reason,
+                           analysis: resp.analysis, fundAsof: resp.fund_asof)
     }
 
     // —— health(免鉴权,联通性自检)——

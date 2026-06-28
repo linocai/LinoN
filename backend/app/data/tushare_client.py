@@ -4,10 +4,12 @@
 → 一律 ok=False, data=None, reason 可读,【绝不抛异常】:
 
     TushareResult = { ok: bool, data: DataFrame | None, reason: str }
-    ts_moneyflow(code, start, end)     # 主力/小单净额
+    ts_moneyflow(code, start, end)     # 主力/小单净额(原始源,保留供 LLM 深判层)
+    ts_moneyflow_dc(code, start, end)  # 个股资金流向·东财源(net_amount=主力净额万元)
     ts_daily_basic(code, trade_date)   # 换手率/涨跌幅/PE-PB
     ts_daily(code, start, end)         # 日线·形态
     ts_trade_cal(start, end)           # 交易日历
+    ts_stock_basic()                   # 全市场代码→行业映射(阶段2 第 5 接口)
 
 token 取自 app.config.settings(读 .env)。本期 token 未到,只验证无 token
 优雅降级路径;有 token 联调待后续(报告已注明)。
@@ -84,8 +86,11 @@ def _get_pro() -> tuple[Optional[Any], str]:
         try:
             import tushare as ts  # 延迟导入
 
-            ts.set_token(token.strip())
-            _TS_PRO = ts.pro_api()
+            # token 直传 pro_api,【不调 ts.set_token】——set_token 会往用户家目录
+            # (`~/...`)写 token 缓存文件;nologin 系统服务用户(如 ECS 上的 linon)
+            # 无可写家目录,会 `[Errno 13] Permission denied: '/home/linon'` 致整条
+            # Tushare 初始化崩、全市场拉取静默降级。pro_api(token) 直传不碰家目录。
+            _TS_PRO = ts.pro_api(token.strip())
             _TS_INIT_REASON = "ok"
         except ImportError:
             _TS_PRO, _TS_INIT_REASON = None, "tushare 包未安装"
@@ -125,9 +130,30 @@ def _call(api_name: str, **kwargs: Any) -> TushareResult:
 # —— 四接口 ————————————————————————————————————————————————————————
 
 def ts_moneyflow(code: str, start: str, end: str) -> TushareResult:
-    """主力/小单净额。start/end 格式 'YYYYMMDD'。"""
+    """主力/小单净额(原始 moneyflow,同花顺式口径)。start/end 格式 'YYYYMMDD'。
+
+    注:原始 moneyflow 偶发"几天到约一周"的发布延迟、会逐步补齐;选股数据层已
+    切到东财源 `ts_moneyflow_dc`(当日数据、6000 积分解锁)。本接口保留供 LLM 深判层用。
+    """
     return _call(
         "moneyflow",
+        ts_code=to_ts_code(code),
+        start_date=start,
+        end_date=end,
+    )
+
+
+def ts_moneyflow_dc(code: str, start: str, end: str) -> TushareResult:
+    """个股资金流向·东财源(moneyflow_dc)。start/end 格式 'YYYYMMDD'。
+
+    东财口径:`net_amount`=主力净额(万元,= buy_elg_amount 超大单 + buy_lg_amount 大单)。
+    6000 积分解锁、全市场给到上一交易日(比原始 moneyflow 的发布延迟更优)。
+    与原始 moneyflow 数值有口径差(东财主力 vs 同花顺式),属预期非 bug——这正是用户在
+    东财/同花顺 App 里看到的那套主力净额。沿四接口降级模式:无 token/无权限/限频/网络
+    异常 → ok=False,data=None,reason 可读,**绝不抛异常**。
+    """
+    return _call(
+        "moneyflow_dc",
         ts_code=to_ts_code(code),
         start_date=start,
         end_date=end,
@@ -161,3 +187,56 @@ def ts_trade_cal(start: str, end: str) -> TushareResult:
         start_date=start,
         end_date=end,
     )
+
+
+# —— 第 5 接口(阶段2):全市场代码→行业映射 ————————————————————————————
+
+def ts_stock_basic() -> TushareResult:
+    """全市场上市股票基础信息(ts_code/symbol/name/industry/list_status)。
+
+    用于白酒/酿酒行业黑名单(精确用 industry 字段归类,Review 拍板)。
+    进程内缓存全市场代码→行业映射,启动/EOD 拉一次(缓存逻辑在 screen.fetch)。
+    沿四接口降级模式:无 token / 接口失败 → ok=False,data=None,不抛异常。
+    """
+    return _call(
+        "stock_basic",
+        exchange="",
+        list_status="L",
+        fields="ts_code,symbol,name,industry,list_status",
+    )
+
+
+# —— 全市场 EOD 批量(阶段2 D1:按 trade_date 单次返回全市场 ~5400 行)——————
+
+def ts_daily_basic_all(trade_date: str) -> TushareResult:
+    """全市场当日 daily_basic(换手率/总市值等)。trade_date 'YYYYMMDD'。
+
+    不带 ts_code → Tushare 按 trade_date 一次返回全市场。无 token/失败优雅降级。
+    """
+    return _call("daily_basic", trade_date=trade_date)
+
+
+def ts_moneyflow_all(trade_date: str) -> TushareResult:
+    """全市场当日 moneyflow(原始源,主力/小单净额)。trade_date 'YYYYMMDD'。
+
+    保留备用;选股数据层已切到 `ts_moneyflow_dc_all`(东财源,当日数据)。
+    """
+    return _call("moneyflow", trade_date=trade_date)
+
+
+def ts_moneyflow_dc_all(trade_date: str) -> TushareResult:
+    """全市场当日 moneyflow_dc(东财源,主力净额)。trade_date 'YYYYMMDD'。
+
+    不带 ts_code → Tushare 按 trade_date 一次返回全市场(6000 积分给到上一交易日)。
+    字段:`net_amount`=主力净额(万元,= 超大单 buy_elg + 大单 buy_lg)。选股资金面唯一信号。
+    无 token/无权限(2000 积分跑会落此)/失败 → 优雅降级,绝不抛异常。
+    """
+    return _call("moneyflow_dc", trade_date=trade_date)
+
+
+def ts_daily_all(trade_date: str) -> TushareResult:
+    """全市场当日 daily(开高低收/量额)。trade_date 'YYYYMMDD'。
+
+    近 N 日形态(放量/新高/均线/60日涨幅)= 逐交易日拉一次再内存拼接。
+    """
+    return _call("daily", trade_date=trade_date)
