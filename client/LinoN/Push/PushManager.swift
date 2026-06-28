@@ -47,6 +47,14 @@ final class PushManager: NSObject, ObservableObject, UNUserNotificationCenterDel
         center.getNotificationSettings { settings in
             Task { @MainActor in self.authorizationStatus = settings.authorizationStatus }
         }
+        clearBadge()   // 启动即清幽灵角标(下方说明)
+    }
+
+    /// 清 App 图标角标。幽灵角标:升级推送带过 `badge`,系统通知后来被清/划掉,
+    /// 但图标红点数字残留、通知中心又找不到对应项。启动 / 进前台 / ack 后均清零。
+    /// iOS 26 用 `setBadgeCount`(`UIApplication.applicationIconBadgeNumber` 自 iOS 17 废弃)。
+    func clearBadge() {
+        UNUserNotificationCenter.current().setBadgeCount(0)
     }
 
     /// 注册硬线 category 的锁屏动作按钮。
@@ -154,6 +162,7 @@ final class PushManager: NSObject, ObservableObject, UNUserNotificationCenterDel
     private func ack(code: String, action: String) async {
         let client = APIClient(baseURL: config.resolvedBaseURL, token: config.apiToken)
         try? await client.ackAlert(code: code, action: action)
+        clearBadge()   // 用户已介入(标记清仓/问教练)→ 清角标
     }
 }
 #endif

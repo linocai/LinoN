@@ -14,6 +14,7 @@ struct LinoNApp: App {
     @State private var model: AppModel
 
     #if os(iOS)
+    @Environment(\.scenePhase) private var scenePhase
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
 
@@ -41,6 +42,9 @@ struct LinoNApp: App {
             RootView(model: model, config: config)
                 .environmentObject(config)
                 .onAppear { wire() }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { appDelegate.clearBadge() }   // 进前台清幽灵角标
+                }
         }
         #endif
     }
@@ -73,6 +77,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             if let t = pendingToken { pm.didRegister(deviceToken: t); pendingToken = nil }
         }
     }
+
+    @MainActor
+    func clearBadge() { pushManager?.clearBadge() }
 
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
