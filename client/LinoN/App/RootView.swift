@@ -67,7 +67,9 @@ struct RootView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 920, minHeight: 600)
+        // minWidth 须容下 240 侧栏 + 候选行设计列宽(行最小 ~724 + 列表 padding 48 = 772 内容区)。
+        // 旧值 920 → 内容区仅 683,候选行右侧(深析按钮)+ 工具栏刷新按钮被裁。1080 给足余量。
+        .frame(minWidth: 1080, minHeight: 640)
         .overlay(alignment: .bottom) { toastOverlay.padding(.bottom, 24) }
         .overlay { if model.modal != nil { modalOverlay } }
         .task { model.bind(config: config); await model.refresh() }
