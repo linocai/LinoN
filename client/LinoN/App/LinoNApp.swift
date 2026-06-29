@@ -29,9 +29,12 @@ struct LinoNApp: App {
             RootView(model: model, config: config)
                 .environmentObject(config)
                 .onAppear { wire() }
-                .frame(minWidth: 920, minHeight: 600)
+                .frame(minWidth: 1080, minHeight: 640)
         }
-        .windowResizability(.contentSize)
+        // contentMinSize:窗口最小 = 内容最小(可放大、不能小于),避免 contentSize 把窗口锁死在
+        // 旧尺寸却把内容撑大致居中裁切;defaultSize 让首开就够宽容下侧栏 + 候选数据表列宽。
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 1240, height: 780)
         Settings {
             SettingsView(model: model, config: config)
                 .frame(width: 460)

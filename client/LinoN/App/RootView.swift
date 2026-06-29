@@ -69,7 +69,9 @@ struct RootView: View {
         }
         // minWidth 须容下 240 侧栏 + 候选行设计列宽(行最小 ~724 + 列表 padding 48 = 772 内容区)。
         // 旧值 920 → 内容区仅 683,候选行右侧(深析按钮)+ 工具栏刷新按钮被裁。1080 给足余量。
-        .frame(minWidth: 1080, minHeight: 640)
+        // alignment .leading:万一窗口仍小于 minWidth(stale 尺寸),内容左对齐保住侧栏,只右侧裁,
+        //   不再居中两边都裁。窗口 sizing 主修在 LinoNApp(contentMinSize + defaultSize + 清旧 frame)。
+        .frame(minWidth: 1080, maxWidth: .infinity, minHeight: 640, maxHeight: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { toastOverlay.padding(.bottom, 24) }
         .overlay { if model.modal != nil { modalOverlay } }
         .task { model.bind(config: config); await model.refresh() }
