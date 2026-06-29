@@ -39,6 +39,7 @@ struct LinoNApp: App {
             SettingsView(model: model, config: config)
                 .frame(width: 460)
                 .padding(20)
+                .preferredColorScheme(.light)   // 设置屏同样强制浅色(独立 Scene,不继承 RootView)
         }
         #else
         WindowGroup {

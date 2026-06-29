@@ -12,11 +12,16 @@ struct RootView: View {
     @ObservedObject var config: AppConfig
 
     var body: some View {
-        #if os(iOS)
-        iosShell
-        #else
-        macShell
-        #endif
+        Group {
+            #if os(iOS)
+            iosShell
+            #else
+            macShell
+            #endif
+        }
+        // 设计为浅色稿(DesignTokens 颜色硬编、无深色变体);强制浅色外观,避免系统夜间模式下
+        // 深色文字落到深色背景上不可见。真·深色模式(各 token 加暗色变体)留后期打磨。
+        .preferredColorScheme(.light)
     }
 
     // MARK: - iOS:底部 TabView
