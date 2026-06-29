@@ -115,6 +115,13 @@ private struct CandidatesListResponse: Decodable {
     let reason: String?
 }
 
+private struct CandidatesRefreshResponse: Decodable {
+    let ok: Bool
+    let trade_date: String
+    let count: Int
+    let degraded: Bool
+}
+
 /// POST /candidates/{code}/analyze 响应(plan §4.3)。
 struct AnalyzeResult {
     let code: String
@@ -260,6 +267,13 @@ actor APIClient {
                                 reason: resp.reason)
     }
 
+    // —— 阶段2:强制重算候选(POST /candidates/refresh;全市场 EOD 拉取,可能数十秒,故长超时)——
+    func refreshCandidates() async throws -> (count: Int, degraded: Bool) {
+        let data = try await post("/api/v1/candidates/refresh", body: EmptyBody(), timeout: 90)
+        let resp = try JSONDecoder().decode(CandidatesRefreshResponse.self, from: data)
+        return (resp.count, resp.degraded)
+    }
+
     // —— 阶段2:on-demand 深判候选(POST /candidates/{code}/analyze;上游失败仍 200 返占位卡)——
     func analyzeCandidate(code: String) async throws -> AnalyzeResult {
         let data = try await post("/api/v1/candidates/\(code)/analyze", body: EmptyBody())
@@ -298,14 +312,14 @@ actor APIClient {
         return try await send(req)
     }
 
-    private func post<B: Encodable>(_ path: String, body: B) async throws -> Data {
+    private func post<B: Encodable>(_ path: String, body: B, timeout: TimeInterval = 12) async throws -> Data {
         try ensureToken()
         var req = URLRequest(url: baseURL.appendingPathComponent(path))
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONEncoder().encode(body)
-        req.timeoutInterval = 12
+        req.timeoutInterval = timeout
         return try await send(req)
     }
 

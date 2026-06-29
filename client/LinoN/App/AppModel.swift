@@ -89,6 +89,7 @@ final class AppModel {
     var candidatesDegraded: Bool = false
     var candidatesDegradedReason: String? = nil
     var candidatesLoading = false
+    var candidatesRefreshing = false   // 手动强制重算中(全市场拉取,可能数十秒)
 
     // —— 阶段2:深析/对话 thread(AnalysisView)——
     var inAnalysis: Bool = false           // 是否在深析全屏(iOS push / macOS 覆盖内容区)
@@ -296,6 +297,22 @@ final class AppModel {
             self.candidatesDegradedReason = "error"
         }
         candidatesLoading = false
+    }
+
+    /// 手动强制重算候选(POST /candidates/refresh:全市场 EOD 拉取,可能数十秒)→ 再拉新缓存 + toast。
+    func recomputeCandidates() async {
+        guard let client = clientProvider() else {
+            showToast("未配置后端连接", isError: true); return
+        }
+        candidatesRefreshing = true
+        defer { candidatesRefreshing = false }
+        do {
+            let r = try await client.refreshCandidates()
+            await loadCandidates()
+            showToast(r.degraded ? "数据源未就绪,暂无候选" : "候选已刷新 · \(r.count) 只合格")
+        } catch {
+            showToast("刷新失败,请稍后重试", isError: true)
+        }
     }
 
     // MARK: - 阶段2:深析 / 对话(AnalysisView)

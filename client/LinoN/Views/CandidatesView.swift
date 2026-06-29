@@ -38,14 +38,37 @@ struct CandidatesViewIOS: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text("候选").font(LNFont.largeTitle).foregroundStyle(LN.textPrimary)
-            Text(model.candidatesTradeDate.isEmpty
-                 ? "EOD 数据 · 机械排序 · 截至昨日收盘"
-                 : "EOD 数据 · 截至 \(model.candidatesTradeDate) 收盘")
-                .font(.system(size: 13)).foregroundStyle(LN.textSecondary)
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("候选").font(LNFont.largeTitle).foregroundStyle(LN.textPrimary)
+                Text(model.candidatesTradeDate.isEmpty
+                     ? "EOD 数据 · 机械排序 · 截至昨日收盘"
+                     : "EOD 数据 · 截至 \(model.candidatesTradeDate) 收盘")
+                    .font(.system(size: 13)).foregroundStyle(LN.textSecondary)
+            }
+            Spacer()
+            refreshButton
         }
         .padding(.horizontal, 4)
+    }
+
+    /// 手动刷新候选(强制重算全市场,可能数十秒;重算中转圈+禁用)。
+    private var refreshButton: some View {
+        Button(action: { Task { await model.recomputeCandidates() } }) {
+            Group {
+                if model.candidatesRefreshing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise").font(.system(size: 16, weight: .semibold))
+                }
+            }
+            .frame(width: 40, height: 40)
+            .background(Circle().fill(LN.cardBg))
+            .overlay(Circle().stroke(LN.hairline, lineWidth: 0.5))
+            .foregroundStyle(LN.accent)
+        }
+        .buttonStyle(.plain)
+        .disabled(model.candidatesRefreshing)
     }
 
     private var explainBar: some View {
@@ -135,6 +158,19 @@ struct CandidatesViewMac: View {
                 .font(.system(size: 12)).foregroundStyle(LN.textSecondary)
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(RoundedRectangle(cornerRadius: 8).fill(LN.textSecondary.opacity(0.06)))
+            Button(action: { Task { await model.recomputeCandidates() } }) {
+                HStack(spacing: 5) {
+                    if model.candidatesRefreshing { ProgressView().controlSize(.small) }
+                    else { Image(systemName: "arrow.clockwise") }
+                    Text(model.candidatesRefreshing ? "刷新中…" : "刷新")
+                }
+                .font(.system(size: 12, weight: .medium))
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 8).fill(LN.accent.opacity(0.10)))
+                .foregroundStyle(LN.accent)
+            }
+            .buttonStyle(.plain)
+            .disabled(model.candidatesRefreshing)
         }
         .padding(.horizontal, 22)
         .frame(height: 52)
