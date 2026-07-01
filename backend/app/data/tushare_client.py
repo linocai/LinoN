@@ -10,6 +10,8 @@
     ts_daily(code, start, end)         # 日线·形态
     ts_trade_cal(start, end)           # 交易日历
     ts_stock_basic()                   # 全市场代码→行业映射(阶段2 第 5 接口)
+    ts_adj_factor_all(trade_date)      # 全市场当日复权因子(阶段2.5 F1,前复权用)
+    ts_adj_factor(code, start, end)    # 单票区间复权因子(阶段2.5 F1)
 
 token 取自 app.config.settings(读 .env)。本期 token 未到,只验证无 token
 优雅降级路径;有 token 联调待后续(报告已注明)。
@@ -240,3 +242,24 @@ def ts_daily_all(trade_date: str) -> TushareResult:
     近 N 日形态(放量/新高/均线/60日涨幅)= 逐交易日拉一次再内存拼接。
     """
     return _call("daily", trade_date=trade_date)
+
+
+# —— 复权因子(阶段2.5 F1):前复权(qfq)技术指标 ——————————————————————————
+
+def ts_adj_factor_all(trade_date: str) -> TushareResult:
+    """全市场当日复权因子。trade_date 'YYYYMMDD'。
+
+    不带 ts_code → Tushare 按 trade_date 一次返回全市场(与 daily/daily_basic 同批量口径)。
+    字段:ts_code / trade_date / adj_factor。缺该日 / 无权限 / 限频 → 优雅降级,绝不抛异常。
+    """
+    return _call("adj_factor", trade_date=trade_date)
+
+
+def ts_adj_factor(code: str, start: str, end: str) -> TushareResult:
+    """单票区间复权因子。start/end 格式 'YYYYMMDD'。供 analyze.py 单票深判形态复权用。"""
+    return _call(
+        "adj_factor",
+        ts_code=to_ts_code(code),
+        start_date=start,
+        end_date=end,
+    )

@@ -84,3 +84,50 @@ class CandidatesRefreshOut(BaseModel):
 class CoachRequest(BaseModel):
     """POST /positions/{id}/coach 请求体(question 可选)。"""
     question: Optional[str] = Field(default=None)
+
+
+# —— 阶段2.5 F4:回测统计只读端点 ————————————————————————————————————
+
+class OutcomeTierStat(BaseModel):
+    """按维度分组的回测统计一行(排序分位分层 / tag / verdict 共用形状)。"""
+    n: int
+    avg_ret_3d: float
+    win_rate: float
+
+
+class OutcomesStatsOut(BaseModel):
+    """GET /candidates/outcomes 响应(plan §4.4)。仅供调试/未来前端,本版本不接客户端。"""
+    sample_total: int
+    since: str = ""
+    by_rank_tier: List[Dict[str, Any]]
+    by_tag: List[Dict[str, Any]]
+    by_verdict: List[Dict[str, Any]]
+    note: str = ""
+
+
+# —— 阶段3 G2:复盘 + 记忆端点 ——————————————————————————————————————————
+
+class ReviewOut(BaseModel):
+    """GET /review 响应(plan §4.3,camelCase 逐字段对齐 Models.swift Review + openHoldings)。"""
+    week: str
+    score: int
+    disciplineRate: int
+    rateTrend: int
+    redFlags: List[str]
+    lessons: str = ""
+    nextWeekNote: str = ""
+    trend: List[Dict[str, Any]]           # [{label, value}]
+    trades: List[Dict[str, Any]]          # [{name, code, pnl, tag, comment}]
+    openHoldings: List[Dict[str, Any]]    # [{name, code, buyPrice, tradeDay}]
+    sampleNote: str = ""
+
+
+class ReviewNoteIn(BaseModel):
+    """POST /review/{week}/note 请求体。"""
+    note: str = Field(default="")
+
+
+class MemoryOut(BaseModel):
+    """GET /memory 响应(plan §4.3)。items = memory 条目;closedTrades = 已平仓 trades 流水。"""
+    items: List[Dict[str, Any]]           # [{kind, content, date}]
+    closedTrades: List[Dict[str, Any]]    # [{name, code, pnl, keptStop, keptTake, keptTime, brokeRule, note, date}]

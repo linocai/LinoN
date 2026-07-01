@@ -102,7 +102,7 @@ def build_candidates(snapshot: MarketSnapshot) -> List[Dict[str, Any]]:
     # 机械排序(放量权重最大)
     scores = rules.rank_score(
         vol_multiples=[s.vol_multiple for s in survivors],
-        fund_3d=[s.net_mf_3d for s in survivors],
+        fund_3d=[s.net_mf_rate_3d for s in survivors],  # 相对口径(占成交额%),免大盘股偏置
         turnovers=[s.turnover for s in survivors],
         pct_60ds=[(s.pct_60d if s.pct_60d is not None else 0.0) for s in survivors],
     )

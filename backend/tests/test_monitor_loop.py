@@ -303,3 +303,48 @@ def test_run_candidate_refresh_exception_safe(db):
     res = loop_mod.run_candidate_refresh(now=datetime(2026, 6, 23, 15, 40),
                                          pipeline_fn=_boom, db_path=db)
     assert res["count"] == 0 and res["degraded"] is True
+
+
+# —— F3:候选回测回填(EOD 候选刷新之后,注入假 backfill_fn 免联网)——————————
+
+def test_run_candidate_backfill_calls_injected_fn(db):
+    captured = {}
+
+    def _fake_backfill(*, now, db_path=None):
+        captured["now"] = now
+        captured["db_path"] = db_path
+        return {"filled": 2, "skipped": 0, "entries_scanned": 2}
+
+    res = loop_mod.run_candidate_backfill(
+        now=datetime(2026, 6, 26, 15, 40), backfill_fn=_fake_backfill, db_path=db,
+    )
+    assert res["filled"] == 2
+    assert captured["now"] == datetime(2026, 6, 26, 15, 40)
+    assert captured["db_path"] == db
+
+
+def test_run_candidate_backfill_exception_safe(db):
+    """回填异常被吞,不掀翻轮询。"""
+    def _boom(*, now, db_path=None):
+        raise RuntimeError("db locked")
+    res = loop_mod.run_candidate_backfill(
+        now=datetime(2026, 6, 26, 15, 40), backfill_fn=_boom, db_path=db,
+    )
+    assert res == {"filled": 0, "skipped": 0, "entries_scanned": 0}
+
+
+def test_run_candidate_backfill_default_fn_wires_to_backtest_module(db, monkeypatch):
+    """默认 backfill_fn 应指向 app.screen.backtest.run_backfill(未注入时)。"""
+    from app.screen import backtest as backtest_mod
+
+    called = {}
+
+    def _fake_run_backfill(now=None, *, daily_all_fn=None, db_path=None):
+        called["now"] = now
+        called["db_path"] = db_path
+        return {"filled": 0, "skipped": 0, "entries_scanned": 0}
+
+    monkeypatch.setattr(backtest_mod, "run_backfill", _fake_run_backfill)
+    res = loop_mod.run_candidate_backfill(now=datetime(2026, 6, 26, 15, 40), db_path=db)
+    assert res["entries_scanned"] == 0
+    assert called["now"] == datetime(2026, 6, 26, 15, 40)

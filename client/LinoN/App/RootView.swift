@@ -33,9 +33,9 @@ struct RootView: View {
                 .tabItem { Label("今日", systemImage: "circle.circle") }.tag(AppView.today)
             tabContent(.candidates) { CandidatesViewIOS(model: model) }
                 .tabItem { Label("候选", systemImage: "list.bullet") }.tag(AppView.candidates)
-            tabContent(.review) { reviewPlaceholder }
+            tabContent(.review) { ReviewViewIOS(model: model) }
                 .tabItem { Label("复盘", systemImage: "chart.bar") }.tag(AppView.review)
-            tabContent(.memory) { memoryPlaceholder }
+            tabContent(.memory) { MemoryViewIOS(model: model) }
                 .tabItem { Label("记忆", systemImage: "bookmark") }.tag(AppView.memory)
         }
         .tint(LN.accent)
@@ -101,7 +101,9 @@ struct RootView: View {
 
             navItem(.today, "今日持仓", "circle.circle", badge: "\(model.holdings.count)")
             navItem(.candidates, "候选列表", "list.bullet", badge: "\(model.shownCandidates.count)")
-            navItem(.review, "周复盘", "chart.bar", badge: "待", badgeColor: LN.amber)
+            // "待" badge 接实际:本周有破线笔(redFlags 非空)→ 红点提示复盘。
+            navItem(.review, "周复盘", "chart.bar",
+                    badge: model.hasReviewFlags ? "待" : nil, badgeColor: LN.down)
             navItem(.memory, "记忆", "bookmark")
 
             Spacer()
@@ -161,8 +163,8 @@ struct RootView: View {
         switch model.view {
         case .today: TodayViewMac(model: model)
         case .candidates: CandidatesViewMac(model: model)
-        case .review: reviewPlaceholder
-        case .memory: memoryPlaceholder
+        case .review: ReviewViewMac(model: model)
+        case .memory: MemoryViewMac(model: model)
         }
     }
 
@@ -175,19 +177,6 @@ struct RootView: View {
         }
     }
     #endif
-
-    // MARK: - 占位视图(阶段3)
-
-    private var reviewPlaceholder: some View {
-        PlaceholderView(title: "周复盘 · 阶段3",
-                        subtitle: "纪律评分 + 执行率趋势 + 每笔点评。\n本期为导航占位,阶段3 重建。",
-                        systemImage: "chart.bar.xaxis")
-    }
-    private var memoryPlaceholder: some View {
-        PlaceholderView(title: "记忆 · 阶段3",
-                        subtitle: "闭环结论 + 长期记忆 + 已平仓流水。\n本期为导航占位,阶段3 重建。",
-                        systemImage: "bookmark")
-    }
 
     @ViewBuilder
     private var toastOverlay: some View {

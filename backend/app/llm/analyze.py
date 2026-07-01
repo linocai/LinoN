@@ -3,14 +3,16 @@
 plan §4.3:on-demand 对候选/在持仓深判。资金面一律截至上一交易日 EOD,返回带 fund_asof 标注。
 
 单票数据补全:
-  · 形态:ts_daily(code, 近 ~65 交易日)内存算放量倍数/创20日新高/站20日均线/60日涨幅/换手。
+  · 形态:ts_daily(code, 近 ~65 交易日)+ ts_adj_factor(前复权,阶段2.5)→
+    app.screen.form 共享函数算放量倍数/创20日新高/站20日均线/60日涨幅/当日涨跌幅/换手。
   · 资金:ts_moneyflow(code, 近 3 日)主力净流入合计 + 当日。
   · 舆情:sentiment.fetch_sentiment(best-effort,失败 neutral 占位,不阻塞)。
 
 降级铁律:缺 Tushare token → 形态/资金段标注缺失但仍调 DeepSeek(news neutral);
 缺 DEEPSEEK_API_KEY/超时/非法 JSON → deepseek.analyze 返回降级占位卡。全链路不崩。
+缺 adj_factor → 该票该日退化为原始价(不复权,不崩)。
 
-可注入(单测免联网):daily_fn / moneyflow_fn / sentiment_fn / deepseek_fn。
+可注入(单测免联网):daily_fn / moneyflow_fn / sentiment_fn / deepseek_fn / adj_factor_fn。
 """
 
 from __future__ import annotations
@@ -18,11 +20,12 @@ from __future__ import annotations
 import logging
 import re
 from datetime import date, timedelta
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from app.calendar.trading_calendar import prev_trading_day
 from app.data import tushare_client as tc
 from app.llm import deepseek, sentiment
+from app.screen.form import compute_form, qfq_closes
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +46,17 @@ def fund_asof_date(now: Optional[date] = None) -> str:
 
 # —— 单票形态/资金补全(Tushare,降级不崩)——————————————————————————————
 
-def _fetch_form(code: str, daily_fn: Callable) -> Dict[str, Any]:
-    """近 ~65 交易日 daily → 算放量/新高/均线/60日涨幅/换手。失败 → 占位 dict(标注缺失)。"""
+def _fetch_form(
+    code: str, daily_fn: Callable, adj_factor_fn: Optional[Callable] = None,
+) -> Dict[str, Any]:
+    """薄封装(签名基本不变,新增可选 adj_factor_fn 免破坏既有调用点)。
+
+    近 ~65 交易日 daily + 复权因子 → qfq_closes 复权 → compute_form 统一算
+    放量/新高/均线/60日涨幅/当日涨跌幅/换手。失败 → 占位 dict(标注缺失)。
+    adj_factor_fn 缺省时用 tc.ts_adj_factor(单测/老调用点可不传,自动退化为
+    该票该日缺因子 → qfq_closes 内部 factor=1.0 不复权,不崩)。
+    """
+    adj_factor_fn = adj_factor_fn or tc.ts_adj_factor
     today = date.today()
     end = today.strftime("%Y%m%d")
     start = (today - timedelta(days=130)).strftime("%Y%m%d")  # 自然日 130 ≈ 65 交易日余量
@@ -54,34 +66,32 @@ def _fetch_form(code: str, daily_fn: Callable) -> Dict[str, Any]:
                 "new_high_20d": "—", "above_ma20": "—", "pct_60d": "—",
                 "turnover": "—", "_degraded": True}
     df = res.data.sort_values("trade_date", ascending=False).reset_index(drop=True)
-    closes = [float(x) for x in df["close"].tolist()]
+    raw_closes = [float(x) for x in df["close"].tolist()]
     vols = [float(x) for x in df["vol"].tolist()]
+    trade_dates = [str(x) for x in df["trade_date"].tolist()]
+
+    # 复权因子(新→旧,与 raw_closes 同序对齐);拉取失败 → 全 None,qfq_closes 内部退化不复权。
+    adj_map: Dict[str, float] = {}
+    try:
+        adj_res = adj_factor_fn(code, start, end)
+        if adj_res.ok and adj_res.data is not None and len(adj_res.data) > 0:
+            for _, r in adj_res.data.iterrows():
+                af = r.get("adj_factor")
+                if af is not None:
+                    adj_map[str(r.get("trade_date"))] = float(af)
+    except Exception as e:
+        logger.warning("单票 adj_factor 拉取异常(降级不复权): %s", e)
+    adj_factors: List[Optional[float]] = [adj_map.get(d) for d in trade_dates]
+
+    closes = qfq_closes(raw_closes, adj_factors)
     today_close = closes[0] if closes else 0.0
-    pre_close = float(df["pre_close"].iloc[0]) if "pre_close" in df else 0.0
-    pct_chg = round((today_close - pre_close) / pre_close * 100, 2) if pre_close > 0 else 0.0
-
-    vol_multiple = 0.0
-    prev5 = [v for v in vols[1:6] if v > 0]
-    if prev5 and vols:
-        avg5 = sum(prev5) / len(prev5)
-        if avg5 > 0:
-            vol_multiple = round(vols[0] / avg5, 2)
-
-    prev20 = closes[1:21]
-    new_high = bool(prev20 and today_close >= max(prev20))
-    ma_win = closes[:20]
-    above_ma = bool(ma_win and today_close >= sum(ma_win) / len(ma_win))
-
-    pct_60d = None
-    if len(closes) >= 2:
-        base = closes[min(60, len(closes) - 1)]
-        if base > 0:
-            pct_60d = round((today_close - base) / base * 100, 2)
+    form = compute_form(closes, vols)
 
     return {
-        "close": round(today_close, 2), "pct_chg": pct_chg, "vol_multiple": vol_multiple,
-        "new_high_20d": new_high, "above_ma20": above_ma,
-        "pct_60d": pct_60d if pct_60d is not None else "—",
+        "close": round(today_close, 2), "pct_chg": form.pct_chg,
+        "vol_multiple": form.vol_multiple,
+        "new_high_20d": form.new_high_20d, "above_ma20": form.above_ma20,
+        "pct_60d": form.pct_60d if form.pct_60d is not None else "—",
         "turnover": "—",  # 单票换手需 daily_basic;深判形态以 daily 为主,换手非关键
         "_degraded": False,
     }
@@ -113,27 +123,33 @@ def analyze_stock(
     pnl_pct: Optional[float] = None,
     trade_day: Optional[int] = None,
     question: Optional[str] = None,
+    history_digest: Optional[str] = None,
     now: Optional[date] = None,
     daily_fn: Optional[Callable] = None,
     moneyflow_fn: Optional[Callable] = None,
     sentiment_fn: Optional[Callable] = None,
     deepseek_fn: Optional[Callable] = None,
+    adj_factor_fn: Optional[Callable] = None,
 ) -> Dict[str, Any]:
     """对单票深判,返回 (analysis: DeepAnalysis dict, fund_asof: str)。
 
     mode='candidate' 选股深判 / mode='coach' 在持仓中间地带二元建议。
+    history_digest(阶段3 G4):中性历史纪律统计串,非空时经 build_user_prompt 注入 prompt
+    的【历史纪律】节(guardrail 见 SYSTEM_PROMPT:仅供引用增说服力,不改 verdict 判定口径)。
+    **注入的是中性 digest,绝不是带情绪的 review_ref**(两路径分流)。
     全链路降级不崩:任一数据段失败 → 占位标注;DeepSeek 失败 → 降级占位卡。
-    可注入 *_fn 免单测联网。
+    可注入 *_fn 免单测联网(adj_factor_fn 阶段2.5 新增,沿 daily_fn 模式)。
     """
     daily_fn = daily_fn or tc.ts_daily
     moneyflow_fn = moneyflow_fn or tc.ts_moneyflow
     sentiment_fn = sentiment_fn or sentiment.fetch_sentiment
     deepseek_fn = deepseek_fn or deepseek.analyze
+    adj_factor_fn = adj_factor_fn or tc.ts_adj_factor
 
     bare = _bare(code)
     fund_asof = fund_asof_date(now)
 
-    form = _fetch_form(bare, daily_fn)
+    form = _fetch_form(bare, daily_fn, adj_factor_fn)
     fund = _fetch_fund(bare, moneyflow_fn)
     try:
         news = sentiment_fn(bare)
@@ -145,6 +161,9 @@ def analyze_stock(
         "mode": mode, "code": bare, "name": name or bare, "sector": sector or "—",
         "form": form, "fund": fund, "news": news, "fund_asof": fund_asof,
         "pnl_pct": pnl_pct, "trade_day": trade_day, "question": question,
+        # 中性历史纪律统计(G4);仅非空时 build_user_prompt 加【历史纪律】节。
+        # 绝不放 review_ref(情绪串)——那只回客户端展示,不进 prompt。
+        "history_digest": history_digest or "",
     }
 
     try:

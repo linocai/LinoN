@@ -317,6 +317,35 @@ def _default_quotes_fn(codes: List[str]) -> Dict[str, object]:
     return get_realtime_quotes(codes)
 
 
+def run_candidate_backfill(
+    *,
+    now: datetime,
+    backfill_fn: Optional[Callable] = None,
+    db_path: Optional[str] = None,
+) -> Dict[str, object]:
+    """信号回测回填(阶段2.5 F3):EOD 候选刷新之后调用,扫描式补齐待回填候选。
+
+    失败吞异常不掀翻轮询(调用方 monitor_loop 已有 try,这里再兜一层)。
+    backfill_fn 可注入(测试免联网):签名 (now, *, daily_all_fn, db_path) -> dict。
+    """
+    backfill_fn = backfill_fn or _default_backfill_fn
+    try:
+        result = backfill_fn(now=now, db_path=db_path)
+    except Exception as e:
+        logger.warning("候选回测回填异常(已吞): %s", e)
+        return {"filled": 0, "skipped": 0, "entries_scanned": 0}
+    logger.info(
+        "候选回测回填:扫描 %d 条,落 %d 条,跳过 %d 条",
+        result.get("entries_scanned", 0), result.get("filled", 0), result.get("skipped", 0),
+    )
+    return result
+
+
+def _default_backfill_fn(*, now, db_path=None):
+    from app.screen.backtest import run_backfill
+    return run_backfill(now=now, db_path=db_path)
+
+
 async def monitor_loop(esc: EscalationManager, stop_event: asyncio.Event) -> None:
     """常驻后台轮询协程。stop_event 置位时优雅退出。
 
@@ -342,6 +371,10 @@ async def monitor_loop(esc: EscalationManager, stop_event: asyncio.Event) -> Non
             if _is_after_candidate_window(now) and last_candidate_date != now.date():
                 await asyncio.to_thread(run_candidate_refresh, now=now)
                 last_candidate_date = now.date()
+                # 候选刷新之后跑回测回填(阶段2.5 F3):扫描式防重,不靠内存变量,
+                # 无需与 last_candidate_date 绑定同一次 tick(下次 tick 也会重新扫描,
+                # 已回填的 UNIQUE(entry_date,code) 幂等跳过,不重复不掀翻轮询)。
+                await asyncio.to_thread(run_candidate_backfill, now=now)
         except Exception as e:  # 轮询任何异常不得掀翻常驻协程
             logger.exception("监控轮询单轮异常(已吞,继续): %s", e)
             sleep_for = POLL_INTERVAL_SEC

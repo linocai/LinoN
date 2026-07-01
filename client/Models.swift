@@ -80,9 +80,20 @@ struct Review: Codable {
     var nextWeekNote: String        // 下周注意 → 写入交易上下文
     var trend: [WeekPoint]          // 近 6 周执行率趋势
     var trades: [ReviewTrade]
+    // 阶段3 补(设计 §4「复盘须同时读未平 positions」):未平持仓 + 空周诚实标注。
+    var openHoldings: [OpenHolding] = []   // 扛过周末的套牢票(只在 positions 不在 trades)
+    var sampleNote: String = ""            // 样本量提示(如"本周 0 笔闭合")
 }
 
 struct WeekPoint: Identifiable, Codable { var id = UUID(); var label: String; var value: Int }
+
+/// 未平持仓精简视图(复盘展示"还有 N 只在持",不计入本周纪律率)。
+struct OpenHolding: Identifiable, Codable {
+    var id = UUID()
+    var name: String; var code: String
+    var buyPrice: Double
+    var tradeDay: Int                // 持仓交易日 D 几(后端 count_holding_trade_days)
+}
 
 struct ReviewTrade: Identifiable, Codable {
     var id = UUID()

@@ -186,6 +186,18 @@ def _ok_moneyflow(code, start, end):
     return TushareResult.success(pd.DataFrame(rows))
 
 
+def _ok_adj_factor_flat(code, start, end):
+    """复权因子恒定(无除权)→ qfq_closes 后序列与原始价一致,不改变既有断言。
+
+    阶段2.5 F2 新增:analyze_stock 现会调 adj_factor_fn 做单票前复权;单测必须
+    显式注入(不能让 tc.ts_adj_factor 默认值触发真网络调用)。恒定因子等价旧行为。
+    """
+    import pandas as pd
+    rows = [{"trade_date": f"202605{30 - i:02d}" if (30 - i) <= 31 else "20260501",
+             "adj_factor": 1.0} for i in range(30)]
+    return TushareResult.success(pd.DataFrame(rows))
+
+
 def _fail_fn(*a, **k):
     return TushareResult.fail("token 缺失")
 
@@ -202,6 +214,7 @@ def test_analyze_stock_full_chain(with_key):
         daily_fn=_ok_daily, moneyflow_fn=_ok_moneyflow,
         sentiment_fn=lambda c: {"titles": ["放量"], "note": "", "degraded": False},
         deepseek_fn=_fake_deepseek,
+        adj_factor_fn=_ok_adj_factor_flat,
     )
     assert "analysis" in out and "fund_asof" in out
     # fund_asof 标注上一交易日

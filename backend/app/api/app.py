@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, status
 
@@ -20,10 +21,14 @@ from app.api.schemas import (
     CandidatesRefreshOut,
     CoachRequest,
     DeviceRegister,
+    MemoryOut,
+    OutcomesStatsOut,
     PositionClose,
     PositionOpen,
     PositionOut,
     PositionsList,
+    ReviewNoteIn,
+    ReviewOut,
 )
 from app.calendar.trading_calendar import (
     count_holding_trade_days,
@@ -327,16 +332,46 @@ def analyze_candidate(code: str) -> dict:
 
     name/sector 优先从最新候选缓存补,缺则用行业映射/code 兜底。
     上游(Tushare/DeepSeek)失败 → 深判返回降级占位卡(verdict=观望),HTTP 仍 200。
+
+    副作用(阶段2.5 F3,响应体不变):深判成功且 verdict 合法时落 analysis_verdicts,
+    供未来回测 join。trade_date 取该 code 所属候选的 entry_date(store.candidate_
+    entry_date_of),非 latest_candidate_date——深判 on-demand,用户可能在候选产生
+    T+1/T+2 才点深判,那时 latest 已滚到新一天,用 latest 会导致回测 join 恒取不到。
+    查不到所属候选日(如直接对非候选票深判)→ 不落(verdict 保持 NULL,不硬塞错日期)。
     """
     bare = _bare_code(code)
     name, sector = _resolve_candidate_meta(bare)
-    result = _analyze_fn(bare, name, sector, "candidate", None, None, None)
+    # candidate 模式也注入中性 history_digest(不改响应结构,历史仅影响 DeepSeek text)。
+    history_digest, _ = _coach_brain(bare)
+    result = _analyze_fn(bare, name, sector, "candidate", None, None, None, history_digest)
+    analysis = result["analysis"]
+    _maybe_persist_verdict(bare, analysis)
     return {
         "ok": True,
         "code": bare,
-        "analysis": result["analysis"],
+        "analysis": analysis,
         "fund_asof": result["fund_asof"],
     }
+
+
+def _maybe_persist_verdict(code: str, analysis: dict) -> None:
+    """candidate 模式深判成功 → 落 analysis_verdicts(仅供回测 join,不改响应契约)。
+
+    trade_date 取该 code 所属候选的 entry_date;查不到 → 不落。verdict 非法(理论上
+    clamp_analysis 已保证合法,这里再兜底)→ 不落。落库异常吞掉,不影响响应。
+    """
+    from app.llm.deepseek import _VERDICTS
+
+    verdict = analysis.get("verdict") if isinstance(analysis, dict) else None
+    if verdict not in _VERDICTS:
+        return
+    entry_date = store.candidate_entry_date_of(code)
+    if not entry_date:
+        return
+    try:
+        store.upsert_analysis_verdict(entry_date, code, verdict)
+    except Exception:
+        logger.warning("落 analysis_verdicts 失败(已吞,不影响响应)", exc_info=True)
 
 
 # —— D4 中间地带 B 剂量(在持仓二元建议)————————————————————————————————
@@ -369,19 +404,156 @@ def coach_position(position_id: int, body: CoachRequest) -> dict:
         pnl_pct = round((price - pos["buy_price"]) / pos["buy_price"] * 100, 2)
     trade_day = count_holding_trade_days(pos["buy_date"], date.today())
 
+    # 教练大脑(G4):两条独立产物,严格分流。
+    # · history_digest(中性统计)→ 进 prompt(经 _analyze_fn),供 LLM 引用增说服力。
+    # · review_ref(带情绪第二人称)→ 仅回客户端展示,**绝不进 prompt**。
+    history_digest, review_ref = _coach_brain(code)
+
     result = _analyze_fn(
         code, pos.get("name", code), "", "coach", pnl_pct, trade_day, body.question,
+        history_digest,
     )
     analysis = result["analysis"]
     advice = coach_advice_from_analysis(analysis)
     reason = analysis.get("plan", "")
-    return {
+    resp = {
         "ok": True,
         "advice": advice,
         "reason": reason,
         "analysis": analysis,
         "fund_asof": result["fund_asof"],
     }
+    if review_ref:              # 无历史破线笔 → 省略字段(降级不硬造)
+        resp["review_ref"] = review_ref
+    return resp
+
+
+def _coach_brain(code: str) -> tuple:
+    """教练大脑两串(history_digest 进 prompt / review_ref 回客户端)。降级不崩。
+
+    返回 (history_digest: str, review_ref: Optional[str])。任何异常 → ('', None)。
+    """
+    try:
+        from app.review.brain import build_history_digest, build_review_ref
+        digest = build_history_digest(trades_fn=store.list_all_trades)
+        ref = build_review_ref(code, trades_fn=store.list_all_trades)
+        return digest or "", ref
+    except Exception:
+        logger.warning("教练大脑构建异常(降级为空)", exc_info=True)
+        return "", None
+
+
+# —— F4 回测统计只读端点(阶段2.5,仅供调试/未来前端,本版本不接客户端)—————————
+
+@app.get(f"{API_PREFIX}/candidates/outcomes", dependencies=[Depends(require_token)])
+def candidates_outcomes(since: str = "") -> OutcomesStatsOut:
+    """回测统计聚合(plan §4.1 三维度:排序分位分层收益 / tag 胜率 / verdict 命中率)。
+
+    读 candidate_outcomes 聚合(不预计算落库)。空表(回填未跑/无候选)→
+    sample_total=0、各分组空数组、note 标"暂无回测样本",HTTP 200(不 500)。
+    """
+    from app.screen.backtest import compute_outcome_stats
+    stats = compute_outcome_stats(since=since or None)
+    return OutcomesStatsOut(**stats)
+
+
+# —— 阶段3 G2:复盘 + 记忆端点 ——————————————————————————————————————————
+
+def _current_week() -> str:
+    """本 ISO 周 'YYYY-Www'(缺 week 参数时的默认)。"""
+    from datetime import date
+    from app.review.score import iso_week
+    return iso_week(date.today())
+
+
+@app.get(f"{API_PREFIX}/review", dependencies=[Depends(require_token)])
+def get_review(week: str = "") -> ReviewOut:
+    """实时聚合某 ISO 周复盘(缺 week → 本周)。返回 Review 形状 + openHoldings + nextWeekNote。
+
+    纯确定性聚合(零 LLM):读全部 trades 聚合该周 discipline_rate/redFlags/每笔/近6周 trend;
+    附未平 positions(openHoldings)+ reviews 表已存的用户注(nextWeekNote)。
+    空库(无 trades/memory)→ 诚实空态(discipline_rate=0),HTTP 200 不 500。
+    """
+    from app.review.score import aggregate_week
+
+    wk = week.strip() or _current_week()
+    try:
+        review = aggregate_week(
+            wk,
+            trades_fn=store.list_all_trades,
+            holdings_fn=store.list_holdings,
+        )
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"ok": False, "reason": "invalid_week", "week": wk},
+        )
+    review["nextWeekNote"] = store.get_review_note(wk)
+    return ReviewOut(**review)
+
+
+@app.post(f"{API_PREFIX}/review/{{week}}/note", dependencies=[Depends(require_token)])
+def save_review_note(week: str, body: ReviewNoteIn) -> dict:
+    """写/覆盖某周 next_week_note(upsert reviews 表,SELECT-then-UPDATE/INSERT)。
+
+    顺手快照当刻 discipline_rate(供历史留痕;GET /review 的 disciplineRate 始终实时算)。
+    """
+    from app.review.score import aggregate_week
+
+    try:
+        review = aggregate_week(
+            week,
+            trades_fn=store.list_all_trades,
+            holdings_fn=store.list_holdings,
+        )
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"ok": False, "reason": "invalid_week", "week": week},
+        )
+    store.upsert_review_note(week, body.note, discipline_rate=review["disciplineRate"])
+    return {"ok": True, "week": week}
+
+
+@app.get(f"{API_PREFIX}/memory", dependencies=[Depends(require_token)])
+def get_memory() -> MemoryOut:
+    """列 memory 表条目(倒序)+ 已平仓 trades 流水(供 MemoryView 历史区)。
+
+    closedTrades 组装:name 为 NULL 兜底回 code(存量历史行可能 name=NULL);
+    pnl 展示串带号;守线徽章字段布尔化;date 取 close_time 的日期部分。
+    空库 → items/closedTrades 皆空数组,HTTP 200。
+    """
+    items = []
+    for m in store.list_memory(limit=200):
+        items.append({
+            "kind": m.get("kind", ""),
+            "content": m.get("content", ""),
+            "date": _date_part(m.get("created_at")),
+        })
+    closed = []
+    for t in store.list_closed_trades():
+        pnl = float(t.get("pnl", 0.0) or 0.0)
+        closed.append({
+            "name": t.get("name") or str(t.get("code", "")),   # NULL 兜底回 code
+            "code": str(t.get("code", "")),
+            "pnl": f"{pnl:+.1f}%",
+            "keptStop": bool(int(t.get("kept_stop", 0))),
+            "keptTake": bool(int(t.get("kept_take", 0))),
+            "keptTime": bool(int(t.get("kept_time", 0))),
+            "brokeRule": bool(int(t.get("broke_rule", 0))),
+            "note": t.get("note") or "",
+            "date": _date_part(t.get("close_time")),
+        })
+    # 流水按 date 倒序(最近在前),与 memory 一致
+    closed.reverse()
+    return MemoryOut(items=items, closedTrades=closed)
+
+
+def _date_part(ts: Optional[str]) -> str:
+    """从 'YYYY-MM-DD HH:MM:SS' 或 'YYYY-MM-DD' 取日期部分;None → 空串。"""
+    if not ts:
+        return ""
+    return str(ts).split(" ")[0].split("T")[0]
 
 
 # —— 深判编排桥(可注入测试替身)————————————————————————————————————————
@@ -407,11 +579,13 @@ def _resolve_candidate_meta(code: str) -> tuple:
         return code, ""
 
 
-def _default_analyze_fn(code, name, sector, mode, pnl_pct, trade_day, question):
+def _default_analyze_fn(code, name, sector, mode, pnl_pct, trade_day, question,
+                        history_digest=None):
     from app.llm.analyze import analyze_stock
     return analyze_stock(
         code, name, sector, mode=mode,
         pnl_pct=pnl_pct, trade_day=trade_day, question=question,
+        history_digest=history_digest,
     )
 
 

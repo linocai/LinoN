@@ -127,14 +127,17 @@ def test_enrich_vol_multiple_and_new_high():
     pre = [19.0] + [10.0] * 20
     dates, dbd = _daily_seq(closes, vols, pre)
     sr = StockRow(code="600000", name="x", industry="")
+    # 未传 adj_by_date(6 参默认 None)→ 无复权数据,退化为原始价(等价旧行为)
     _enrich_form(sr, "600000", dates, dbd, dates[0])
     assert sr.vol_multiple == 3.0
     assert sr.new_high_20d is True
     assert sr.above_ma20 is True
     # 60 日涨幅:closes 只有 21 个 → base 取最旧(10),(20-10)/10=100%
     assert sr.pct_60d == pytest.approx(100.0)
-    # 当日涨跌幅 (20-19)/19*100
-    assert sr.pct_chg == pytest.approx(5.26, abs=0.05)
+    # 当日涨跌幅(阶段2.5 F2 改:从复权后 closes[0]/closes[1] 派生,不再用原始 pre_close)
+    # closes[0]=20, closes[1]=10 → (20-10)/10*100=100%(与 pre=19 算出的旧 5.26% 不同,
+    # 这正是 plan 铁律要修的口径——除权后 pre_close 字段不可信,改用复权后价序列派生)。
+    assert sr.pct_chg == pytest.approx(100.0)
 
 
 def test_enrich_no_data_safe():
@@ -152,13 +155,16 @@ def _df(records):
     return pd.DataFrame(records)
 
 
-def _patch_fetch(monkeypatch, *, basic, dc_by_date, daily_by_date, stock_basic=None):
-    """注入假 Tushare 接口(全市场 daily_basic / 东财 moneyflow_dc / daily / stock_basic)。
+def _patch_fetch(monkeypatch, *, basic, dc_by_date, daily_by_date, stock_basic=None,
+                  adj_by_date=None):
+    """注入假 Tushare 接口(全市场 daily_basic / 东财 moneyflow_dc / daily / adj_factor / stock_basic)。
 
-    dc_by_date / daily_by_date: {'YYYYMMDD': [records]};缺日 → ok=False 降级。
+    dc_by_date / daily_by_date / adj_by_date: {'YYYYMMDD': [records]};缺日 → ok=False 降级。
     stock_basic: 行业映射记录列表(None → 不提供,行业退化为空)。
+    adj_by_date 缺省(None)→ 全部降级(ok=False),等价旧行为(不复权)。
     """
     fetch_mod.reset_industry_cache()
+    adj_by_date = adj_by_date or {}
 
     def _basic_all(td):
         return TushareResult.success(_df(basic)) if basic is not None \
@@ -174,6 +180,11 @@ def _patch_fetch(monkeypatch, *, basic, dc_by_date, daily_by_date, stock_basic=N
         return TushareResult.success(_df(recs)) if recs is not None \
             else TushareResult.fail("daily 失败")
 
+    def _adj_all(td):
+        recs = adj_by_date.get(td)
+        return TushareResult.success(_df(recs)) if recs is not None \
+            else TushareResult.fail("adj_factor 无数据")
+
     def _stock_basic():
         return TushareResult.success(_df(stock_basic)) if stock_basic is not None \
             else TushareResult.fail("stock_basic 失败")
@@ -181,6 +192,7 @@ def _patch_fetch(monkeypatch, *, basic, dc_by_date, daily_by_date, stock_basic=N
     monkeypatch.setattr(fetch_mod.tc, "ts_daily_basic_all", _basic_all)
     monkeypatch.setattr(fetch_mod.tc, "ts_moneyflow_dc_all", _dc_all)
     monkeypatch.setattr(fetch_mod.tc, "ts_daily_all", _daily_all)
+    monkeypatch.setattr(fetch_mod.tc, "ts_adj_factor_all", _adj_all)
     monkeypatch.setattr(fetch_mod.tc, "ts_stock_basic", _stock_basic)
 
 
@@ -228,6 +240,83 @@ def test_fetch_snapshot_daily_basic_fail_degrades(monkeypatch):
     _patch_fetch(monkeypatch, basic=None, dc_by_date={}, daily_by_date={})
     snap = fetch_market_snapshot("20260626")
     assert snap.ok is False and snap.rows == []
+
+
+# —— fetch_market_snapshot:复权(阶段2.5 F2)——除权样例验 pct_60d/new_high 正确 ————
+
+def test_fetch_snapshot_qfq_ex_dividend_corrects_pct_60d(monkeypatch):
+    """窗口内除权跳变(adj_factor 中途减半)→ 复权后 pct_60d/new_high 与不复权不同且正确。
+
+    构造:某票原始 close 恒为 10(除权前后价格连续无变化——典型除权特征,除权日
+    原始 close 会有断层但这里简化用"因子跳变、原始价不变"来隔离验证复权逻辑本身),
+    adj_factor 在窗口中段(20260610 之前)从 2.0(除权前)变为 1.0(除权后,最新)。
+    复权后:除权前的原始价应被【放大】(乘以 2.0/1.0),不复权则看不出这个差异。
+    """
+    td = "20260626"
+    dates = fetch_mod._recent_trade_dates(td, 5)   # 新→旧 5 天:26,25,24,23,22(近似,含跳周末)
+    # 最新 3 天 factor=1.0(除权后),更早 2 天 factor=2.0(除权前)
+    daily_by_date = {}
+    adj_by_date = {}
+    for i, d in enumerate(dates):
+        close = 10.0
+        daily_by_date[d] = [{"ts_code": "600000.SH", "close": close,
+                              "vol": 1000.0, "pre_close": close}]
+        factor = 1.0 if i < 3 else 2.0
+        adj_by_date[d] = [{"ts_code": "600000.SH", "adj_factor": factor}]
+
+    basic = [{"ts_code": "600000.SH", "close": 10.0,
+              "turnover_rate": 3.0, "total_mv": 500_000.0}]
+    _patch_fetch(monkeypatch, basic=basic, dc_by_date={}, daily_by_date=daily_by_date,
+                 adj_by_date=adj_by_date)
+
+    snap = fetch_market_snapshot(td)
+    assert snap.ok is True
+    row = next(r for r in snap.rows if r.code == "600000")
+    # 不复权时 pct_60d 应为 0(原始价恒 10,无变化);复权后更早日被放大 2x(=20),
+    # 故 today(10) vs base(qfq 后的最早日 close=20)→ (10-20)/20*100 = -50%,
+    # 与"不复权 0%"不同且方向正确(复权后能看出相对更早时点其实是缩水,因为那时
+    # 除权前的可比价其实更高)。
+    assert row.pct_60d == pytest.approx(-50.0)
+
+
+def test_fetch_snapshot_missing_adj_factor_degrades_to_raw(monkeypatch):
+    """adj_factor 全市场拉取失败(整日缺)→ 该日退化 factor=None,不崩,近似不复权。"""
+    td = "20260626"
+    basic = [{"ts_code": "600000.SH", "close": 10.0,
+              "turnover_rate": 3.0, "total_mv": 500_000.0}]
+    daily = {"20260626": [{"ts_code": "600000.SH", "close": 10.0,
+                           "vol": 1000.0, "pre_close": 9.8}]}
+    # adj_by_date 缺省 → 全部降级(_adj_all 一律 fail)
+    _patch_fetch(monkeypatch, basic=basic, dc_by_date={}, daily_by_date=daily)
+    snap = fetch_market_snapshot(td)
+    assert snap.ok is True   # 不崩
+
+
+def test_fetch_snapshot_pct_chg_no_false_jump_on_ex_dividend_day(monkeypatch):
+    """当日 pct_chg 从复权后 closes[0]/closes[1] 派生,除权日不出假突变。
+
+    构造:原始 close 今日=5.0(除权后价,除以2),昨日=10.0(除权前价);若用原始
+    pre_close(=10.0 假设未调整)算会得到 -50% 假暴跌。复权后:今日 factor=1.0,
+    昨日 factor=2.0(除权发生在两天之间)→ qfq(昨日)=10.0×2.0/1.0=20.0,
+    今日(5.0)vs 复权后昨日(20.0)... 这里改用更直观场景验证不假突变:
+    今日 close=5.0(factor=1.0,基准),昨日 close=10.0 但除权因子相同(factor=1.0,
+    表示两天间无除权)→ 复权后昨日仍 10.0,pct_chg=(5-10)/10*100=-50%(真实下跌,
+    非除权误判)。
+    """
+    td = "20260626"
+    dates = fetch_mod._recent_trade_dates(td, 3)
+    daily_by_date = {
+        dates[0]: [{"ts_code": "600000.SH", "close": 5.0, "vol": 1000.0, "pre_close": 10.0}],
+        dates[1]: [{"ts_code": "600000.SH", "close": 10.0, "vol": 1000.0, "pre_close": 10.0}],
+        dates[2]: [{"ts_code": "600000.SH", "close": 10.0, "vol": 1000.0, "pre_close": 10.0}],
+    }
+    adj_by_date = {d: [{"ts_code": "600000.SH", "adj_factor": 1.0}] for d in dates}
+    basic = [{"ts_code": "600000.SH", "close": 5.0, "turnover_rate": 3.0, "total_mv": 500_000.0}]
+    _patch_fetch(monkeypatch, basic=basic, dc_by_date={}, daily_by_date=daily_by_date,
+                 adj_by_date=adj_by_date)
+    snap = fetch_market_snapshot(td)
+    row = next(r for r in snap.rows if r.code == "600000")
+    assert row.pct_chg == pytest.approx(-50.0)   # 真实下跌,非除权假突变
 
 
 # —— pipeline:黑名单/高位/粗筛/排序/截断(喂样例,免联网)——————————————

@@ -102,6 +102,17 @@ final class AppModel {
     /// 当前深析卡的资金时序标注(显著展示;深判端点返回 fund_asof)。
     var fundAsof: String = ""
 
+    // —— 阶段3:复盘 / 记忆 ——
+    var review: Review? = nil
+    var reviewLoading = false
+    var reviewNoteDraft: String = ""       // 下周注意编辑草稿
+    var reviewSaving = false
+    var memoryItems: [MemoryItem] = []
+    var archivedTrades: [ClosedTradeRow] = []
+    var memoryLoading = false
+    /// 阶段3 G4:当前 coach 卡的复盘历史引用(带情绪第二人称;无历史破线 → nil,卡不显引用块)。
+    var coachReviewRef: String? = nil
+
     // —— 模态 / 录入 / toast ——
     var modal: ModalKind? = nil
     var closeCode: String? = nil
@@ -159,8 +170,16 @@ final class AppModel {
         k.floatPnl = mkt - cost
         k.floatPnlPct = cost > 0 ? (mkt - cost) / cost * 100 : 0
         k.positionCount = holdings.count
+        // 阶段3:纪律执行率接真值(有复盘数据时);无则保留占位默认。
+        if let r = review {
+            k.disciplineRate = r.disciplineRate
+            k.disciplineTrend = r.rateTrend
+        }
         return k
     }
+
+    /// 侧栏"待"badge:本周有破线笔(redFlags 非空)→ 提示复盘。
+    var hasReviewFlags: Bool { !(review?.redFlags.isEmpty ?? true) }
 
     /// 触止损持仓(教练横幅触发依据 · 本期占位文案)。
     var alertHolding: Position? { holdings.first(where: { $0.hitStop }) }
@@ -376,8 +395,9 @@ final class AppModel {
         do {
             let r = try await client.coachPosition(id: id)
             self.fundAsof = r.fundAsof
+            self.coachReviewRef = r.reviewRef   // 阶段3 G4:历史引用(无则 nil,coach 卡不显引用块)
             if hit {
-                // 触损 → coach 红橙卡(文案取后端 reason;复盘历史引用占位阶段3)。
+                // 触损 → coach 红橙卡(文案取后端 reason;复盘历史引用换真实 review_ref,阶段3 H3)。
                 thread.append(ChatMessage(role: .coach, text: r.reason, analysis: r.analysis))
             } else {
                 // 中间地带 → 普通助手气泡(advice 拿/清 + 理由)。
@@ -448,6 +468,62 @@ final class AppModel {
         thread = []
         analysisContext = nil
         composer = ""
+        coachReviewRef = nil
+    }
+
+    // MARK: - 阶段3:复盘 / 记忆网络动作
+
+    /// 拉周复盘(GET /review;缺 week → 本周)。降级不弹错(空态由视图诚实展示)。
+    func loadReview(week: String? = nil) async {
+        guard let client = clientProvider() else {
+            review = nil; return
+        }
+        reviewLoading = true
+        do {
+            let r = try await client.fetchReview(week: week)
+            self.review = r
+            self.reviewNoteDraft = r.nextWeekNote
+        } catch {
+            // 复盘拉取失败不弹错(降级语义);保留旧值或清空
+            if case APIError.noToken = error {} else {
+                showToast("复盘拉取失败", isError: true)
+            }
+        }
+        reviewLoading = false
+    }
+
+    /// 保存下周注意(POST /review/{week}/note)→ 回读 nextWeekNote。
+    func saveReviewNote() async {
+        guard let client = clientProvider(), let wk = review?.week else {
+            showToast("未配置后端连接", isError: true); return
+        }
+        reviewSaving = true
+        defer { reviewSaving = false }
+        do {
+            try await client.saveReviewNote(week: wk, note: reviewNoteDraft)
+            review?.nextWeekNote = reviewNoteDraft
+            showToast("下周注意已保存 · 会写入交易上下文")
+        } catch {
+            showToast("保存失败,请重试", isError: true)
+        }
+    }
+
+    /// 拉记忆 + 已平仓流水(GET /memory)。降级不弹错。
+    func loadMemory() async {
+        guard let client = clientProvider() else {
+            memoryItems = []; archivedTrades = []; return
+        }
+        memoryLoading = true
+        do {
+            let m = try await client.fetchMemory()
+            self.memoryItems = m.items
+            self.archivedTrades = m.closedTrades
+        } catch {
+            if case APIError.noToken = error {} else {
+                showToast("记忆拉取失败", isError: true)
+            }
+        }
+        memoryLoading = false
     }
 
     // MARK: - 模态控制

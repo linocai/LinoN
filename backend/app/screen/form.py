@@ -1,0 +1,116 @@
+"""复权 + 共享形态计算(阶段2.5 F1,plan §4.0/§4.3)。
+
+抽出 `fetch.py`(全市场批量)与 `analyze.py`(单票深判)两处重复的近 N 日形态计算,
+统一在此一处实现,两处改为调用共享函数(一处修、两处生效)。复权在共享函数内部
+统一做。
+
+【复权序列方向契约,钉死不得反,见 plan §4.0】:
+  `qfq_closes` 入参 raw_closes / adj_factors 均为【新→旧】排序(与 fetch.py/analyze.py
+  现有序列一致——下标 0 = 最新交易日 = 今天)。基准 = adj_factors[0](新→旧的第 0 个 =
+  最新日)。公式 qfq_close[i] = raw_close[i] × adj_factors[i] / adj_factors[0]。
+  ⇒ 最新日(i=0)close 恒不变(factor 约成 1),更早日按各自因子相对最新日缩放。
+  【禁止用 [-1] 当基准】——那是最早日 = 后复权,历史价整体错位、new_high/ma/pct_60d
+  全线偏且无除权票测不出这个方向错误。
+
+只复权 close 序列(new_high/ma20/pct_60d/当日 pct_chg 依赖价格连续性);vol 不动
+(adj_factor 是价格因子,不改成交量;vol_multiple 用原始量在除权日仍可比)。
+
+缺 adj_factor(None / 0 / 长度不齐)→ 该处 factor=1.0(退化为原始价,即当前行为),
+不崩、不阻塞。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List, Optional
+
+from app.screen import rules
+
+
+@dataclass
+class FormResult:
+    """近 N 日形态计算结果(复权后)。"""
+    pct_chg: float = 0.0              # 当日涨跌幅 %(从复权后 closes[0]/closes[1] 派生)
+    vol_multiple: float = 0.0         # 当日量 / 前 5 日均量(vol 不复权)
+    new_high_20d: bool = False        # 创 20 日新高(复权后价)
+    above_ma20: bool = False          # 站上 20 日均线(复权后价)
+    pct_60d: Optional[float] = None   # 近 60 交易日累计涨幅 %(复权后价)
+
+
+def qfq_closes(raw_closes: List[float], adj_factors: List[Optional[float]]) -> List[float]:
+    """前复权收盘价序列。入参【新→旧】,基准 = adj_factors[0](最新日)。
+
+    qfq_close[i] = raw_close[i] × adj_factors[i] / adj_factors[0]。
+    缺因子(None/0/长度与 raw_closes 不齐)→ 该处退化 factor=1.0(即该日用原始价)。
+    adj_factors[0] 本身缺失/为 0 → 全体退化为 1.0(等价不复权,不崩)。
+    """
+    n = len(raw_closes)
+    if n == 0:
+        return []
+    base = adj_factors[0] if adj_factors else None
+    if not base:  # None 或 0 → 无法建立基准,整体退化不复权
+        return list(raw_closes)
+    out: List[float] = []
+    for i in range(n):
+        factor = adj_factors[i] if i < len(adj_factors) else None
+        if not factor:
+            factor = base  # 缺该日因子 → 退化为该日不缩放(等同 factor=1.0 相对基准)
+        out.append(raw_closes[i] * factor / base)
+    return out
+
+
+def compute_form(
+    closes_new_to_old: List[float],
+    vols_new_to_old: List[float],
+) -> FormResult:
+    """从近 N 日【已复权】收盘价序列 + 原始成交量序列(均新→旧)算形态。
+
+    口径逐字对齐现有 _enrich_form/_fetch_form:
+      · 当日涨跌幅 = (closes[0]-closes[1])/closes[1]×100(不再用原始 pre_close 字段,
+        复权后 today_close 变了而 raw pre_close 没变,除权当天会算出假突变)。
+      · 放量倍数 = 当日量 / 前 5 日均量(vols[1:6],vol 不复权)。
+      · 创 20 日新高:今日收盘 >= 近 20 日(不含今日,closes[1:21])最高收盘(含等号)。
+      · 站上 N 日均线:ma_window = closes[:rules.MA_DAYS](引用常量,不硬编 20)。
+      · 60 日基准:base_idx = min(60, len(closes)-1)。
+    数据不足 → 各字段保守退化(vol_multiple=0/new_high=False/pct_60d=None),不崩。
+    """
+    result = FormResult()
+    if not closes_new_to_old:
+        return result
+
+    today_close = closes_new_to_old[0]
+
+    # 当日涨跌幅:从复权后 closes[0]/closes[1] 派生
+    if len(closes_new_to_old) >= 2 and closes_new_to_old[1] > 0:
+        result.pct_chg = round(
+            (today_close - closes_new_to_old[1]) / closes_new_to_old[1] * 100, 2
+        )
+
+    # 放量倍数(vol 不复权)
+    if vols_new_to_old:
+        today_vol = vols_new_to_old[0]
+        prev5 = [v for v in vols_new_to_old[1:6] if v > 0]
+        if prev5:
+            avg5 = sum(prev5) / len(prev5)
+            if avg5 > 0:
+                result.vol_multiple = round(today_vol / avg5, 2)
+
+    # 创 20 日新高(复权后价,不含今日)
+    prev20 = [c for c in closes_new_to_old[1:21] if c > 0]
+    if prev20 and today_close > 0:
+        result.new_high_20d = today_close >= max(prev20)
+
+    # 站上 N 日均线(引用 rules.MA_DAYS,不硬编)
+    ma_window = closes_new_to_old[: rules.MA_DAYS]
+    if ma_window:
+        ma = sum(ma_window) / len(ma_window)
+        result.above_ma20 = today_close >= ma
+
+    # 近 60 交易日累计涨幅
+    if len(closes_new_to_old) >= 2:
+        base_idx = min(60, len(closes_new_to_old) - 1)
+        base = closes_new_to_old[base_idx]
+        if base > 0:
+            result.pct_60d = round((today_close - base) / base * 100, 2)
+
+    return result

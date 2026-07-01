@@ -10,10 +10,15 @@
           next_week_note, created_at)
   memory(id, kind, content, created_at)
   device_tokens(id, token UNIQUE, platform, created_at)   -- 阶段1 A.1 设备注册
+  candidates(...)                                          -- 阶段2 D1/D2 候选缓存
+  candidate_outcomes(...) / analysis_verdicts(...)          -- 阶段2.5 F3 回测 + verdict 落库
 
 CRUD 最小集:open_position / close_position(落 trades + 归档 position) /
             list_holdings / get_holding / insert_review / insert_memory /
-            upsert_device_token / list_device_tokens(阶段1 A.1 推送遍历)。
+            upsert_device_token / list_device_tokens(阶段1 A.1 推送遍历) /
+            upsert_candidate_outcome / list_outcomes / candidate_entry_date_of /
+            pending_backfill_entries(扫描式回填防重)/ get_verdict / upsert_analysis_verdict
+            (ON CONFLICT DO UPDATE 覆盖最新,阶段2.5 F3)。
 
 注:plan DDL 是后端 schema 权威。客户端 Models.swift 上 TradeRecord 多了 name/note 字段
    (展示用),不在后端 0.4 DDL 内——本期严格照 plan DDL 建表,name/note 留待阶段3 复盘细化时
@@ -23,12 +28,15 @@ CRUD 最小集:open_position / close_position(落 trades + 归档 position) /
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
+
+log = logging.getLogger(__name__)
 
 # —— 止损/止盈/容差常量(规则单一事实源,与客户端 Models.swift / plan §4b 对齐)——
 STOP_RATIO = 0.95           # 止损线 = buy_price × 0.95(-5%)
@@ -116,6 +124,31 @@ CREATE TABLE IF NOT EXISTS candidates (
     created_at   TEXT    NOT NULL,
     UNIQUE(trade_date, code)
 );
+
+CREATE TABLE IF NOT EXISTS candidate_outcomes (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_date    TEXT    NOT NULL,   -- 候选产生日(= candidates.trade_date)'YYYY-MM-DD'
+    code          TEXT    NOT NULL,
+    name          TEXT    NOT NULL,
+    rank          INTEGER NOT NULL,   -- 当时机械排序名次(从 candidates 快照带出)
+    tag           TEXT,               -- 当时标签(放量突破/站上均线)
+    verdict       TEXT,               -- 深判 verdict(可进/观望/不进);未深判 → NULL
+    entry_close   REAL    NOT NULL,   -- 候选日原始 daily.close(仅供人工核对,不参与 ret_3d)
+    exit_date     TEXT    NOT NULL,   -- entry_date 后第 3 个交易日 'YYYY-MM-DD'
+    exit_close    REAL    NOT NULL,   -- exit_date 原始 daily.close(仅供人工核对,不参与 ret_3d)
+    ret_3d        REAL    NOT NULL,   -- 3 个交易日 daily.pct_chg 累乘收益 %(复权正确,见 plan §4.0)
+    created_at    TEXT    NOT NULL,
+    UNIQUE(entry_date, code)          -- 每票每候选日至多一行(回填幂等)
+);
+
+CREATE TABLE IF NOT EXISTS analysis_verdicts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_date   TEXT    NOT NULL,    -- = 该 code 所属 candidates 快照的 entry_date(非 latest_candidate_date)
+    code         TEXT    NOT NULL,
+    verdict      TEXT    NOT NULL,    -- 最近一次候选深判 verdict(可进/观望/不进)
+    created_at   TEXT    NOT NULL,
+    UNIQUE(trade_date, code)          -- ON CONFLICT DO UPDATE 覆盖为最新一次深判(非保留最早)
+);
 """
 
 
@@ -137,12 +170,30 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     return conn
 
 
+def _ensure_trades_columns(conn: sqlite3.Connection) -> None:
+    """给 trades 表补 name/note 列(阶段3 G3,项目首次真 migration,高危区)。
+
+    SQLite 无 `ADD COLUMN IF NOT EXISTS`,故靠 PRAGMA table_info 探测(硬编精确集合)。
+    整段 try/except:ALTER 意外失败**只 log.error,不 re-raise**——init_db 跑在 app.py
+    lifespan 启动路径、每次 ECS 重启都执行,一个展示列的迁移绝不能拖垮整个交易监控服务的
+    startup(name/note 缺了打分照跑,打分只读 kept_*/broke_rule/pnl/close_time)。
+    """
+    try:
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(trades)")}  # row[1] = 列名
+        for col in ("name", "note"):
+            if col not in existing:
+                conn.execute(f"ALTER TABLE trades ADD COLUMN {col} TEXT")
+    except Exception:
+        log.error("trades 补列(name/note)迁移异常(已吞,不拖垮 startup)", exc_info=True)
+
+
 def init_db(db_path: Optional[str] = None) -> str:
-    """建四表(幂等)。返回落库路径。"""
+    """建四表(幂等)+ trades 补列迁移。返回落库路径。"""
     path = _db_path(db_path)
     conn = get_connection(path)
     try:
         conn.executescript(_SCHEMA)
+        _ensure_trades_columns(conn)   # 阶段3 G3:trades 补 name/note(幂等,失败不拖垮)
         conn.commit()
     finally:
         conn.close()
@@ -320,6 +371,8 @@ def close_position(
     用于 kept_time 判定;不传则保守 True。
     返回新 trade id。position 不存在或非 holding → 抛 ValueError。
     """
+    from app.review.score import _mechanical_comment   # 短评单一事实源(与 G1 aggregate 同源)
+
     conn = get_connection(db_path)
     try:
         row = conn.execute(
@@ -335,16 +388,19 @@ def close_position(
         ctime = close_time or _now()
         pnl_pct = round((close_price - open_price) / open_price * 100, 4) if open_price else 0.0
         flags = _compute_kept_flags(open_price, close_price, pnl_pct, holding_trade_days)
+        name = row["name"]                       # 从 position 取(阶段3 G3 补列)
+        note = _mechanical_comment(flags)        # 机械短评(守住铁律/破止损/破时间)
 
         cur = conn.execute(
             """INSERT INTO trades
                (code, open_price, close_price, open_time, close_time,
-                kept_stop, kept_take, kept_time, pnl, broke_rule, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                kept_stop, kept_take, kept_time, pnl, broke_rule, created_at, name, note)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 row["code"], open_price, close_price, open_time, ctime,
                 int(flags["kept_stop"]), int(flags["kept_take"]),
                 int(flags["kept_time"]), pnl_pct, int(flags["broke_rule"]), _now(),
+                name, note,
             ),
         )
         trade_id = int(cur.lastrowid)
@@ -352,10 +408,55 @@ def close_position(
         conn.execute(
             "UPDATE positions SET status = 'closed' WHERE id = ?", (position_id,)
         )
+        # 破线笔:同一事务内原子沉淀一条闭环结论(不 commit 后再开新连接)。
+        # 若此处抛异常,trades 写 + position 归档一并回滚(原子;G3 验收③)。
+        if flags["broke_rule"]:
+            insert_memory("闭环结论", f"{name or row['code']}:{note}", conn=conn)
         conn.commit()
         return trade_id
     finally:
         conn.close()
+
+
+# —— trades 只读聚合(阶段3 G1:复盘打分数据源)——————————————————————————
+#
+# ⚠️ trades 表【无 status 列】——每一行本身就是一笔已闭合交易(close_position 落库时写)。
+#    读 trades 禁止 `WHERE status='closed'`(那是 positions 概念,会抛 no such column)。
+#    list_closed_trades = 直接读全表,可选按 close_time 的 since/until 过滤。
+
+def list_closed_trades(
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    db_path: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """列出已闭合 trades(直接读全表,无 status 过滤),按 close_time 升序。
+
+    可选按 close_time 过滤:since <= close_time(<= until)。since/until 为
+    'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM:SS' 串(字典序比较即时序,SQLite TEXT 存)。
+    """
+    conn = get_connection(db_path)
+    try:
+        clauses: List[str] = []
+        params: List[Any] = []
+        if since is not None:
+            clauses.append("close_time >= ?")
+            params.append(since)
+        if until is not None:
+            clauses.append("close_time <= ?")
+            params.append(until)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = conn.execute(
+            f"SELECT * FROM trades{where} ORDER BY close_time",
+            tuple(params),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def list_all_trades(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """列出所有 trades(供近 6 周趋势跨周聚合),按 close_time 升序。"""
+    return list_closed_trades(db_path=db_path)
 
 
 def insert_review(
@@ -386,18 +487,101 @@ def insert_review(
         conn.close()
 
 
-def insert_memory(kind: str, content: str, db_path: Optional[str] = None) -> int:
-    """写一条长期记忆/闭环结论/里程碑。返回 memory id。"""
-    conn = get_connection(db_path)
-    try:
+def insert_memory(
+    kind: str,
+    content: str,
+    db_path: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    """写一条长期记忆/闭环结论/里程碑。返回 memory id。
+
+    conn 传入时复用现有连接(不自开、不 commit)——供 close_position 在同一事务内
+    原子沉淀 memory(阶段3 G3:trades 写 + memory 写要么都成要么都不成)。
+    conn 为 None 时自开连接并 commit(独立调用)。
+    """
+    if conn is not None:
         cur = conn.execute(
             "INSERT INTO memory (kind, content, created_at) VALUES (?, ?, ?)",
             (kind, content, _now()),
         )
-        conn.commit()
+        return int(cur.lastrowid)
+    conn2 = get_connection(db_path)
+    try:
+        cur = conn2.execute(
+            "INSERT INTO memory (kind, content, created_at) VALUES (?, ?, ?)",
+            (kind, content, _now()),
+        )
+        conn2.commit()
         return int(cur.lastrowid)
     finally:
+        conn2.close()
+
+
+def list_memory(limit: int = 200, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """列 memory 表条目(倒序,最近 limit 条,防未来极端累积)。"""
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT id, kind, content, created_at FROM memory ORDER BY id DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+    finally:
         conn.close()
+    return [dict(r) for r in rows]
+
+
+# —— 周复盘注记(阶段3 G2:reviews 首次写入)——————————————————————————————
+#
+# ⚠️ reviews 表【无 UNIQUE(week) 约束】——禁用 ON CONFLICT(week)(无冲突目标会报错)。
+#    upsert 用 SELECT id WHERE week=? → 有则 UPDATE、无则 INSERT(单用户无并发,可接受非原子)。
+#    不给 reviews 另加约束(SQLite 加约束要建新表搬数据,风险更大不值得)。
+
+def upsert_review_note(
+    week: str, note: str, discipline_rate: int = 0, db_path: Optional[str] = None
+) -> int:
+    """写/覆盖某周 next_week_note(SELECT-then-UPDATE/INSERT,不用 ON CONFLICT)。
+
+    存 note + 当刻 discipline_rate 快照(供历史留痕;端点返回的 disciplineRate 始终实时算)。
+    同 week 二次调用覆盖同一行、不新增。返回该行 id。
+    """
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT id FROM reviews WHERE week = ? ORDER BY id LIMIT 1", (week,)
+        ).fetchone()
+        if row is not None:
+            rid = int(row["id"])
+            conn.execute(
+                "UPDATE reviews SET next_week_note = ?, discipline_rate = ? WHERE id = ?",
+                (note, discipline_rate, rid),
+            )
+        else:
+            cur = conn.execute(
+                """INSERT INTO reviews
+                   (week, score, red_flags, discipline_rate, lessons, next_week_note, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (week, discipline_rate, json.dumps([], ensure_ascii=False),
+                 discipline_rate, "", note, _now()),
+            )
+            rid = int(cur.lastrowid)
+        conn.commit()
+        return rid
+    finally:
+        conn.close()
+
+
+def get_review_note(week: str, db_path: Optional[str] = None) -> str:
+    """读某周已存的 next_week_note;无则空串。"""
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT next_week_note FROM reviews WHERE week = ? ORDER BY id LIMIT 1", (week,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return ""
+    return row["next_week_note"] or ""
 
 
 # —— 设备 token(阶段1 A.1:APNs device token 注册;推送时遍历)——————————
@@ -544,3 +728,154 @@ def latest_candidate_date(db_path: Optional[str] = None) -> Optional[str]:
     finally:
         conn.close()
     return row["trade_date"] if row else None
+
+
+def candidate_entry_date_of(code: str, db_path: Optional[str] = None) -> Optional[str]:
+    """查某 code 在 candidates 缓存里【最近一次】所属的 trade_date(= entry_date)。
+
+    供 /analyze 落 analysis_verdicts 用(plan §4.2:trade_date 必须取该 code 所属候选的
+    entry_date,不是 latest_candidate_date——深判 on-demand,用户可能在候选产生 T+1/T+2
+    才点深判,那时 latest 已滚到新一天,用 latest 会导致回测 join 恒取不到)。
+    查不到(该 code 从未出现在任何候选快照里)→ None。
+    """
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT trade_date FROM candidates WHERE code = ? ORDER BY trade_date DESC LIMIT 1",
+            (code,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return row["trade_date"] if row else None
+
+
+# —— 回测(阶段2.5 F3):candidate_outcomes + analysis_verdicts ————————————
+
+def upsert_candidate_outcome(row: Dict[str, Any], db_path: Optional[str] = None) -> int:
+    """写一行回测结果(幂等 UNIQUE(entry_date, code))。
+
+    row 需含:entry_date, code, name, rank, tag, verdict(可 None), entry_close,
+    exit_date, exit_close, ret_3d。重复 (entry_date, code) → 覆盖(保持最新一次回填)。
+    返回该行 id。
+    """
+    conn = get_connection(db_path)
+    try:
+        cur = conn.execute(
+            """INSERT INTO candidate_outcomes
+               (entry_date, code, name, rank, tag, verdict, entry_close,
+                exit_date, exit_close, ret_3d, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(entry_date, code) DO UPDATE SET
+                   name=excluded.name, rank=excluded.rank, tag=excluded.tag,
+                   verdict=excluded.verdict, entry_close=excluded.entry_close,
+                   exit_date=excluded.exit_date, exit_close=excluded.exit_close,
+                   ret_3d=excluded.ret_3d, created_at=excluded.created_at""",
+            (
+                row["entry_date"], row["code"], row.get("name", row["code"]),
+                int(row.get("rank", 0)), row.get("tag"), row.get("verdict"),
+                float(row["entry_close"]), row["exit_date"], float(row["exit_close"]),
+                float(row["ret_3d"]), _now(),
+            ),
+        )
+        conn.commit()
+        r = conn.execute(
+            "SELECT id FROM candidate_outcomes WHERE entry_date = ? AND code = ?",
+            (row["entry_date"], row["code"]),
+        ).fetchone()
+        return int(r["id"]) if r else int(cur.lastrowid)
+    finally:
+        conn.close()
+
+
+def list_outcomes(since: Optional[str] = None, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """读回测结果(可选 entry_date >= since 过滤,'YYYY-MM-DD')。按 entry_date 升序。"""
+    conn = get_connection(db_path)
+    try:
+        if since:
+            rows = conn.execute(
+                "SELECT * FROM candidate_outcomes WHERE entry_date >= ? ORDER BY entry_date",
+                (since,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM candidate_outcomes ORDER BY entry_date"
+            ).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def pending_backfill_entries(
+    today, min_trade_days: int = 4, db_path: Optional[str] = None
+) -> List[Dict[str, str]]:
+    """扫描待回填的 (entry_date, code) 批:candidates 有、candidate_outcomes 缺、
+
+    且 entry_date 距 today 已过 >= min_trade_days 个交易日(含 entry_date 自身,
+    D 计数口径——entry_date=D1,min_trade_days=4 即 entry_date 后已过 3 个交易日,
+    exit 数据〔第 3 个交易日〕必然已收盘可拉)。
+
+    扫描式防重(不靠内存变量):天然靠 UNIQUE(entry_date,code) 幂等,重启/错过窗口
+    次日 tick 会自动补齐已过去但未回填的候选,不永久漏。today 为 date/datetime。
+    返回 [{'entry_date':..., 'code':..., 'name':..., 'rank':..., 'tag':...}, ...]。
+    """
+    from app.calendar.trading_calendar import count_holding_trade_days
+
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            """SELECT c.trade_date AS entry_date, c.code AS code, c.name AS name,
+                      c.rank AS rank, c.tag AS tag
+               FROM candidates c
+               LEFT JOIN candidate_outcomes o
+                 ON o.entry_date = c.trade_date AND o.code = c.code
+               WHERE o.id IS NULL
+               ORDER BY c.trade_date, c.rank"""
+        ).fetchall()
+    finally:
+        conn.close()
+    out: List[Dict[str, str]] = []
+    for r in rows:
+        d = dict(r)
+        if count_holding_trade_days(d["entry_date"], today) >= min_trade_days:
+            out.append(d)
+    return out
+
+
+def get_verdict(trade_date: str, code: str, db_path: Optional[str] = None) -> Optional[str]:
+    """查某 (trade_date, code) 的深判 verdict;无则 None。"""
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT verdict FROM analysis_verdicts WHERE trade_date = ? AND code = ?",
+            (trade_date, code),
+        ).fetchone()
+    finally:
+        conn.close()
+    return row["verdict"] if row else None
+
+
+def upsert_analysis_verdict(
+    trade_date: str, code: str, verdict: str, db_path: Optional[str] = None
+) -> int:
+    """落一次深判 verdict(ON CONFLICT DO UPDATE 覆盖为最新一次,非保留最早)。
+
+    trade_date 必须是该 code 所属候选的 entry_date(调用方用 candidate_entry_date_of
+    解析),不是 latest_candidate_date。返回该行 id。
+    """
+    conn = get_connection(db_path)
+    try:
+        cur = conn.execute(
+            """INSERT INTO analysis_verdicts (trade_date, code, verdict, created_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(trade_date, code) DO UPDATE SET
+                   verdict=excluded.verdict, created_at=excluded.created_at""",
+            (trade_date, code, verdict, _now()),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id FROM analysis_verdicts WHERE trade_date = ? AND code = ?",
+            (trade_date, code),
+        ).fetchone()
+        return int(row["id"]) if row else int(cur.lastrowid)
+    finally:
+        conn.close()

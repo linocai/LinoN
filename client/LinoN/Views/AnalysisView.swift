@@ -183,8 +183,10 @@ struct AnalysisView: View {
                         .foregroundStyle(LN.down)
                     Text(msg.text)
                         .font(.system(size: 13.5)).foregroundStyle(LN.textPrimary).lineSpacing(3)
-                    // 复盘历史引用 —— 占位(大脑阶段3 接真实复盘历史)。
-                    reviewQuotePlaceholder
+                    // 复盘历史引用(阶段3 H3):有 review_ref → 显真实历史教训;无 → 整块不显。
+                    if let ref = model.coachReviewRef, !ref.isEmpty {
+                        reviewQuoteBlock(ref)
+                    }
                 }
                 .padding(.horizontal, 18).padding(.vertical, 16)
                 .background(
@@ -218,19 +220,19 @@ struct AnalysisView: View {
         .padding(.vertical, 9)
     }
 
-    /// 复盘历史引用 —— 阶段2 占位(阶段3 由"大脑"调真实复盘历史 + 破纪律检测填充)。
-    private var reviewQuotePlaceholder: some View {
+    /// 复盘历史引用(阶段3 H3):消费后端 review_ref(带情绪第二人称的真实历史教训)。
+    /// 仅在有 review_ref 时由 coachBlock 调用;无历史破线笔则整块不显(非占位)。
+    private func reviewQuoteBlock(_ ref: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "clock")
+            Image(systemName: "clock.arrow.circlepath")
                 .font(.system(size: 14, weight: .semibold)).foregroundStyle(LN.down)
-            (Text("复盘历史引用 · 阶段3 接入").font(.system(size: 12, weight: .semibold)).foregroundStyle(LN.textPrimary)
-             + Text(" —— 破纪律检测与历史教训引用将在复盘大脑就绪后填充(本期为占位)。")
-                .font(.system(size: 12)).foregroundStyle(LN.textSecondary))
+            Text(ref)
+                .font(.system(size: 12.5, weight: .medium)).foregroundStyle(LN.textPrimary)
                 .lineSpacing(2)
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
-        .background(RoundedRectangle(cornerRadius: 11).fill(LN.textSecondary.opacity(0.04)))
-        .overlay(RoundedRectangle(cornerRadius: 11).stroke(LN.hairline, lineWidth: 0.5))
+        .background(RoundedRectangle(cornerRadius: 11).fill(LN.down.opacity(0.05)))
+        .overlay(RoundedRectangle(cornerRadius: 11).stroke(LN.down.opacity(0.16), lineWidth: 0.5))
     }
 
     // MARK: - thinking 占位

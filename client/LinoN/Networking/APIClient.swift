@@ -146,6 +146,7 @@ struct CoachResult {
     let reason: String
     let analysis: DeepAnalysis
     let fundAsof: String
+    let reviewRef: String?    // 阶段3 G4:教练大脑历史引用(带情绪第二人称;无则 nil)
 }
 
 private struct CoachResponse: Decodable {
@@ -154,7 +155,65 @@ private struct CoachResponse: Decodable {
     let reason: String
     let analysis: DeepAnalysis
     let fund_asof: String
+    let review_ref: String?   // 可选(无历史破线笔则后端省略此字段)
 }
+
+// MARK: - 阶段3:复盘 / 记忆(plan §4.3)
+
+/// GET /review 响应(camelCase,逐字段对齐 Models.swift Review + openHoldings)。
+/// Review/WeekPoint/ReviewTrade/OpenHolding 带 `id = UUID()` 默认值,后端 JSON 无 id,
+/// 故用 DTO 解码后再映射(同 CandidateListDTO 模式,不直接 decode 进 Review)。
+private struct ReviewResponse: Decodable {
+    let week: String
+    let score: Int
+    let disciplineRate: Int
+    let rateTrend: Int
+    let redFlags: [String]
+    let lessons: String
+    let nextWeekNote: String
+    let trend: [WeekPointDTO]
+    let trades: [ReviewTradeDTO]
+    let openHoldings: [OpenHoldingDTO]
+    let sampleNote: String
+
+    struct WeekPointDTO: Decodable { let label: String; let value: Int }
+    struct ReviewTradeDTO: Decodable {
+        let name: String; let code: String; let pnl: String; let tag: String; let comment: String
+    }
+    struct OpenHoldingDTO: Decodable {
+        let name: String; let code: String; let buyPrice: Double; let tradeDay: Int
+    }
+}
+
+/// GET /memory 响应(items = memory 条目;closedTrades = 已平仓 trades 流水)。
+struct MemoryResult {
+    let items: [MemoryItem]
+    let closedTrades: [ClosedTradeRow]
+}
+
+/// 已平仓流水一行(守线徽章 + 点评 + 日期;供 MemoryView 历史区)。
+struct ClosedTradeRow: Identifiable {
+    let id = UUID()
+    let name: String; let code: String
+    let pnl: String
+    let keptStop: Bool; let keptTake: Bool; let keptTime: Bool; let brokeRule: Bool
+    let note: String
+    let date: String
+}
+
+private struct MemoryResponse: Decodable {
+    let items: [MemoryItemDTO]
+    let closedTrades: [ClosedTradeDTO]
+
+    struct MemoryItemDTO: Decodable { let kind: String; let content: String; let date: String }
+    struct ClosedTradeDTO: Decodable {
+        let name: String; let code: String; let pnl: String
+        let keptStop: Bool; let keptTake: Bool; let keptTime: Bool; let brokeRule: Bool
+        let note: String; let date: String
+    }
+}
+
+struct ReviewNoteBody: Encodable { let note: String }
 
 struct AlertAckRequest: Encodable {
     let action: String     // "marked_close" | "dismissed"
@@ -282,12 +341,60 @@ actor APIClient {
     }
 
     // —— 阶段2:中间地带教练(POST /positions/{id}/coach;非持仓 404)——
+    //     阶段3 G4:响应可选 review_ref(教练大脑历史引用)透传给 CoachResult。
     func coachPosition(id: Int, question: String? = nil) async throws -> CoachResult {
         let data = try await post("/api/v1/positions/\(id)/coach",
                                   body: CoachRequestBody(question: question))
         let resp = try JSONDecoder().decode(CoachResponse.self, from: data)
         return CoachResult(advice: resp.advice, reason: resp.reason,
-                           analysis: resp.analysis, fundAsof: resp.fund_asof)
+                           analysis: resp.analysis, fundAsof: resp.fund_asof,
+                           reviewRef: resp.review_ref)
+    }
+
+    // —— 阶段3:拉周复盘(GET /review?week=;缺 week → 本周实时聚合)——
+    func fetchReview(week: String? = nil) async throws -> Review {
+        var path = "/api/v1/review"
+        if let w = week, !w.isEmpty { path += "?week=\(w)" }
+        let data = try await get(path)
+        let r = try JSONDecoder().decode(ReviewResponse.self, from: data)
+        return Review(
+            week: r.week, score: r.score, redFlags: r.redFlags,
+            disciplineRate: r.disciplineRate, rateTrend: r.rateTrend,
+            lessons: r.lessons, nextWeekNote: r.nextWeekNote,
+            trend: r.trend.map { WeekPoint(label: $0.label, value: $0.value) },
+            trades: r.trades.map {
+                ReviewTrade(name: $0.name, code: $0.code, pnl: $0.pnl,
+                            tag: ReviewTag(rawValue: $0.tag) ?? .good, comment: $0.comment)
+            },
+            openHoldings: r.openHoldings.map {
+                OpenHolding(name: $0.name, code: $0.code, buyPrice: $0.buyPrice, tradeDay: $0.tradeDay)
+            },
+            sampleNote: r.sampleNote
+        )
+    }
+
+    // —— 阶段3:写下周注意(POST /review/{week}/note)——
+    @discardableResult
+    func saveReviewNote(week: String, note: String) async throws -> Bool {
+        _ = try await post("/api/v1/review/\(week)/note", body: ReviewNoteBody(note: note))
+        return true
+    }
+
+    // —— 阶段3:拉记忆 + 已平仓流水(GET /memory)——
+    func fetchMemory() async throws -> MemoryResult {
+        let data = try await get("/api/v1/memory")
+        let m = try JSONDecoder().decode(MemoryResponse.self, from: data)
+        let items = m.items.map {
+            MemoryItem(kind: MemoryKind(rawValue: $0.kind) ?? .conclusion,
+                       content: $0.content, date: $0.date)
+        }
+        let closed = m.closedTrades.map {
+            ClosedTradeRow(name: $0.name, code: $0.code, pnl: $0.pnl,
+                           keptStop: $0.keptStop, keptTake: $0.keptTake,
+                           keptTime: $0.keptTime, brokeRule: $0.brokeRule,
+                           note: $0.note, date: $0.date)
+        }
+        return MemoryResult(items: items, closedTrades: closed)
     }
 
     // —— health(免鉴权,联通性自检)——
