@@ -337,7 +337,9 @@ actor APIClient {
 
     // —— 阶段2:on-demand 深判候选(POST /candidates/{code}/analyze;上游失败仍 200 返占位卡)——
     func analyzeCandidate(code: String) async throws -> AnalyzeResult {
-        let data = try await post("/api/v1/candidates/\(code)/analyze", body: EmptyBody())
+        // 后端同步调 DeepSeek(超时 30s)+ 舆情/行情拉取,常 >12s → 需长超时(同 refresh 90s 坑)。
+        // 设 60s > 后端 DeepSeek 超时:慢时后端先返降级 200 占位卡,客户端不因 12s 超时误报"网络错误"。
+        let data = try await post("/api/v1/candidates/\(code)/analyze", body: EmptyBody(), timeout: 60)
         let resp = try JSONDecoder().decode(AnalyzeResponse.self, from: data)
         return AnalyzeResult(code: resp.code, analysis: resp.analysis, fundAsof: resp.fund_asof)
     }
@@ -345,8 +347,9 @@ actor APIClient {
     // —— 阶段2:中间地带教练(POST /positions/{id}/coach;非持仓 404)——
     //     阶段3 G4:响应可选 review_ref(教练大脑历史引用)透传给 CoachResult。
     func coachPosition(id: Int, question: String? = nil) async throws -> CoachResult {
+        // 同 analyze:coach 也同步走 DeepSeek,需 60s 长超时(默认 12s 会误报网络错误)。
         let data = try await post("/api/v1/positions/\(id)/coach",
-                                  body: CoachRequestBody(question: question))
+                                  body: CoachRequestBody(question: question), timeout: 60)
         let resp = try JSONDecoder().decode(CoachResponse.self, from: data)
         return CoachResult(advice: resp.advice, reason: resp.reason,
                            analysis: resp.analysis, fundAsof: resp.fund_asof,
