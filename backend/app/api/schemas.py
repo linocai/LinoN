@@ -86,6 +86,26 @@ class CoachRequest(BaseModel):
     question: Optional[str] = Field(default=None)
 
 
+# —— v1.2.1 Phase A:对话式深判 —————————————————————————————————————————
+
+class ChatMessageIn(BaseModel):
+    """POST /chat 请求体里的单条历史消息(OpenAI 风格,role 只允许两值)。"""
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ChatRequest(BaseModel):
+    """POST /chat 请求体(plan §4.1)。
+
+    mode=candidate 候选深析对话 / coach 持仓追问对话;position_id 仅 coach 模式必带
+    (取 pnl_pct/trade_day,且以 pos["code"] 为准、忽略 body.code——同现 /coach)。
+    """
+    mode: Literal["candidate", "coach"]
+    code: str = Field(..., min_length=1)
+    messages: List[ChatMessageIn] = Field(..., min_length=1)
+    position_id: Optional[int] = Field(default=None)
+
+
 # —— 阶段2.5 F4:回测统计只读端点 ————————————————————————————————————
 
 class OutcomeTierStat(BaseModel):

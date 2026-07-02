@@ -78,10 +78,7 @@ struct CandidatesViewIOS: View {
     private var candidateList: some View {
         VStack(spacing: 0) {
             ForEach(Array(model.shownCandidates.enumerated()), id: \.element.id) { idx, c in
-                Button(action: { Task { await model.openAnalysis(code: c.code) } }) {
-                    CandidateRow(candidate: c, compact: true)
-                }
-                .buttonStyle(.plain)
+                CandidateRow(candidate: c, compact: true, model: model)
                 if idx < model.shownCandidates.count - 1 {
                     Divider().overlay(LN.hairline).padding(.leading, 16)
                 }
@@ -194,10 +191,7 @@ struct CandidatesViewMac: View {
     private var candidateList: some View {
         VStack(spacing: 0) {
             ForEach(Array(model.shownCandidates.enumerated()), id: \.element.id) { idx, c in
-                Button(action: { Task { await model.openAnalysis(code: c.code) } }) {
-                    CandidateRow(candidate: c, compact: false)
-                }
-                .buttonStyle(.plain)
+                CandidateRow(candidate: c, compact: false, model: model)
                 if idx < model.shownCandidates.count - 1 {
                     Divider().overlay(LN.hairline)
                 }
@@ -309,6 +303,7 @@ struct ClosedEmptyCard: View {
 struct CandidateRow: View {
     let candidate: Candidate
     var compact: Bool = true
+    let model: AppModel
 
     private var c: Candidate { candidate }
     private var volIsHigh: Bool { c.volPct >= 80 }
@@ -344,22 +339,21 @@ struct CandidateRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(LNFmt.price(c.price))
-                    .font(.system(size: 15, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(LN.textPrimary)
-                Text(c.chg)
-                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(c.chg.contains("-") ? LN.down : LN.up)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(LN.textTertiary)
-                    .padding(.top, 2)
+            VStack(alignment: .trailing, spacing: 6) {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(LNFmt.price(c.price))
+                        .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(LN.textPrimary)
+                    Text(c.chg)
+                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(c.chg.contains("-") ? LN.down : LN.up)
+                }
+                compactAnalyzeButton
             }
             .fixedSize()
         }
         .padding(.horizontal, 15).padding(.vertical, 14)
         .background(c.warn != nil ? LN.amber.opacity(0.04) : Color.clear)
-        .contentShape(Rectangle())
     }
 
     // MARK: - macOS:横向列(# / 股票 / 现价涨幅 / 放量条·倍数 / 主力 / 换手 / 深析)
@@ -404,7 +398,6 @@ struct CandidateRow: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 15)
         .background(c.warn != nil ? LN.amber.opacity(0.04) : Color.clear)
-        .contentShape(Rectangle())
     }
 
     // MARK: - 共享小部件
@@ -479,20 +472,44 @@ struct CandidateRow: View {
         if let w = width { bar.frame(width: w) } else { bar }
     }
 
+    /// macOS:横列深析按钮(真按钮,唯一可点入口)。
     private var analyzeButton: some View {
-        Text("深析")
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(rankIsFirst ? .white : LN.accent)
-            .padding(.horizontal, 13).padding(.vertical, rankIsFirst ? 6 : 5)
-            .background(
-                Group {
-                    if rankIsFirst {
-                        RoundedRectangle(cornerRadius: 8).fill(LN.accent)
-                    } else {
-                        RoundedRectangle(cornerRadius: 8).stroke(LN.accent.opacity(0.3), lineWidth: 1)
+        Button(action: { Task { await model.openAnalysis(code: c.code) } }) {
+            Text("深析")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(rankIsFirst ? .white : LN.accent)
+                .padding(.horizontal, 13).padding(.vertical, rankIsFirst ? 6 : 5)
+                .background(
+                    Group {
+                        if rankIsFirst {
+                            RoundedRectangle(cornerRadius: 8).fill(LN.accent)
+                        } else {
+                            RoundedRectangle(cornerRadius: 8).stroke(LN.accent.opacity(0.3), lineWidth: 1)
+                        }
                     }
-                }
-            )
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// iOS:右侧竖排价/涨下方的紧凑深析按钮(唯一可点入口,行其余区域不可点)。
+    private var compactAnalyzeButton: some View {
+        Button(action: { Task { await model.openAnalysis(code: c.code) } }) {
+            Text("深析")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(rankIsFirst ? .white : LN.accent)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(
+                    Group {
+                        if rankIsFirst {
+                            RoundedRectangle(cornerRadius: 7).fill(LN.accent)
+                        } else {
+                            RoundedRectangle(cornerRadius: 7).stroke(LN.accent.opacity(0.3), lineWidth: 1)
+                        }
+                    }
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
 

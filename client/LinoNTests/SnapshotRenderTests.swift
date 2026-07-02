@@ -75,7 +75,7 @@ final class SnapshotRenderTests: XCTestCase {
             CandidatesExplainBar(headline: CandidatesCopy.headline(m))
             VStack(spacing: 0) {
                 ForEach(Array(m.shownCandidates.enumerated()), id: \.element.id) { idx, c in
-                    CandidateRow(candidate: c, compact: true)
+                    CandidateRow(candidate: c, compact: true, model: m)
                     if idx < m.shownCandidates.count - 1 {
                         Divider().overlay(LN.hairline).padding(.leading, 16)
                     }
@@ -93,7 +93,7 @@ final class SnapshotRenderTests: XCTestCase {
         let m = model(withCandidates: true)
         let list = VStack(spacing: 0) {
             ForEach(Array(m.shownCandidates.enumerated()), id: \.element.id) { idx, c in
-                CandidateRow(candidate: c, compact: false)
+                CandidateRow(candidate: c, compact: false, model: m)
                 if idx < m.shownCandidates.count - 1 {
                     Divider().overlay(LN.hairline).padding(.leading, 16)
                 }
@@ -106,15 +106,16 @@ final class SnapshotRenderTests: XCTestCase {
 
     func testRenderCandidateRowNilScoreNoCollapse() {
         // score=nil(前向兼容旧后端)→ 徽章不显示、行布局不塌(iOS + macOS 各渲一张)。
+        let m = AppModel()
         let g = AnalysisAxis(value: "—", tone: .neutral, text: "")
         let a = DeepAnalysis(form: g, fund: g, news: g, verdict: .watch, plan: "")
         let c = Candidate(rank: 1, name: "无分票", code: "600000", sector: "银行", tag: "站上均线",
                           price: 12.30, chg: "+2.00%", volMultiple: "2.0x", volPct: 60, flow: "+0.4亿",
                           turnover: "3.5%", warn: nil, score: nil, analysis: a)
-        let iosRow = CandidateRow(candidate: c, compact: true)
+        let iosRow = CandidateRow(candidate: c, compact: true, model: m)
             .background(LN.cardBg).padding(16)
         render(iosRow, size: CGSize(width: 390, height: 120), name: "candidate_row_nilscore_ios")
-        let macRow = CandidateRow(candidate: c, compact: false)
+        let macRow = CandidateRow(candidate: c, compact: false, model: m)
             .background(LN.cardBg).padding(16)
         render(macRow, size: CGSize(width: 900, height: 120), name: "candidate_row_nilscore_mac")
     }

@@ -200,3 +200,114 @@ def coach_advice_from_analysis(analysis: Dict[str, Any]) -> str:
     plan §4.3:拿→观望/可进语义,清→不进。verdict='不进' → '清';否则 '拿'。
     """
     return "清" if analysis.get("verdict") == "不进" else "拿"
+
+
+# —— v1.2.1 Phase A:对话式深判编排 ————————————————————————————————————————
+
+# 事实块 (code, 当日 YYYYMMDD) 级 TTL 缓存,仅供 chat_stock 链路使用(plan §4.2 A3 /
+# plan-critic 🔵3:不得给共享 _fetch_form/_fetch_fund 全局加缓存,那会顺带改 /analyze
+# 行为,违反端点隔离初衷)。模块级 dict + 日期键天然失效(跨日不再命中);失败不缓存
+# (下轮重试)。不引第三方缓存库。
+_chat_fact_cache: Dict[Any, Dict[str, Any]] = {}
+
+
+def _chat_cache_key(bare: str, today: date) -> Any:
+    return (bare, today.strftime("%Y%m%d"))
+
+
+def _fetch_chat_facts(
+    bare: str,
+    daily_fn: Callable,
+    moneyflow_fn: Callable,
+    sentiment_fn: Callable,
+    adj_factor_fn: Callable,
+    now: Optional[date],
+) -> Dict[str, Any]:
+    """chat_stock 专属:同一 (code, 当日) 内追问命中缓存,不重拉 form/fund/舆情。
+
+    与 analyze_stock/_fetch_form/_fetch_fund 完全独立,不影响 /analyze /coach 行为。
+    失败(无数据/异常)不缓存,留给下一轮追问重试。
+    """
+    today = now or date.today()
+    key = _chat_cache_key(bare, today)
+    cached = _chat_fact_cache.get(key)
+    if cached is not None:
+        return cached
+
+    form = _fetch_form(bare, daily_fn, adj_factor_fn)
+    fund = _fetch_fund(bare, moneyflow_fn)
+    _asof_raw = fund.get("asof")
+    fund_asof = (
+        f"{_asof_raw[:4]}-{_asof_raw[4:6]}-{_asof_raw[6:8]}" if _asof_raw
+        else fund_asof_date(now)
+    )
+    try:
+        news = sentiment_fn(bare)
+    except Exception as e:
+        logger.warning("对话舆情编排异常(降级): %s", e)
+        news = {"titles": [], "note": "未获取到舆情,仅技术+资金判定", "degraded": True}
+
+    facts = {"form": form, "fund": fund, "fund_asof": fund_asof, "news": news}
+    # 形态/资金均降级(无数据)时不缓存,留给下一轮追问重试;否则缓存供同日追问复用。
+    if not form.get("_degraded") or not fund.get("_degraded"):
+        _chat_fact_cache[key] = facts
+    return facts
+
+
+def chat_stock(
+    code: str,
+    messages: List[Dict[str, str]],
+    *,
+    mode: str = "candidate",
+    name: str = "",
+    sector: str = "",
+    pnl_pct: Optional[float] = None,
+    trade_day: Optional[int] = None,
+    history_digest: Optional[str] = None,
+    now: Optional[date] = None,
+    chat_fn: Optional[Callable] = None,
+    daily_fn: Optional[Callable] = None,
+    moneyflow_fn: Optional[Callable] = None,
+    sentiment_fn: Optional[Callable] = None,
+    adj_factor_fn: Optional[Callable] = None,
+) -> Dict[str, Any]:
+    """多轮对话式深判编排:补真实形态+资金+fund_asof(+best-effort 舆情)→ 拼 context →
+    deepseek.chat(messages, context) → 返回 {reply, verdict, fund_asof, degraded}。
+
+    mode='candidate' 候选深析对话 / mode='coach' 持仓追问对话。事实块**每轮都注入**
+    (不判 is_first)——追问轮用户常问资金/形态,必须拿到真实事实(plan §4.2 A3 /
+    plan-critic 重要6:口径统一)。同一 (code, 当日) 内命中 TTL 缓存不重拉。
+    history_digest 为中性统计,**绝不含 review_ref**(守味隔离,调用方需自行丢弃 ref)。
+    全链路降级不崩:任一数据段失败 → 占位标注;DeepSeek 失败 → degraded_chat。
+    可注入 *_fn 免单测联网。
+    """
+    daily_fn = daily_fn or tc.ts_daily
+    moneyflow_fn = moneyflow_fn or tc.ts_moneyflow_dc
+    sentiment_fn = sentiment_fn or sentiment.fetch_sentiment
+    adj_factor_fn = adj_factor_fn or tc.ts_adj_factor
+    chat_fn = chat_fn or deepseek.chat
+
+    bare = _bare(code)
+    facts = _fetch_chat_facts(bare, daily_fn, moneyflow_fn, sentiment_fn, adj_factor_fn, now)
+
+    context: Dict[str, Any] = {
+        "mode": mode, "code": bare, "name": name or bare, "sector": sector or "—",
+        "form": facts["form"], "fund": facts["fund"], "news": facts["news"],
+        "fund_asof": facts["fund_asof"],
+        "pnl_pct": pnl_pct, "trade_day": trade_day,
+        # 中性历史纪律统计;绝不放 review_ref(情绪串)——那只回客户端展示,不进 prompt。
+        "history_digest": history_digest or "",
+    }
+
+    try:
+        result = chat_fn(messages, context)
+    except Exception as e:   # deepseek.chat 内部已兜底,这里再兜一层
+        logger.warning("DeepSeek 对话编排异常(降级): %s", e)
+        result = deepseek.degraded_chat(f"编排异常 {type(e).__name__}")
+
+    return {
+        "reply": result.get("reply", ""),
+        "verdict": result.get("verdict", "观望"),
+        "fund_asof": facts["fund_asof"],
+        "degraded": bool(result.get("degraded", False)),
+    }

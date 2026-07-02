@@ -19,6 +19,7 @@ from app.api.schemas import (
     AlertAck,
     CandidatesList,
     CandidatesRefreshOut,
+    ChatRequest,
     CoachRequest,
     DeviceRegister,
     MemoryOut,
@@ -441,6 +442,87 @@ def _coach_brain(code: str) -> tuple:
     except Exception:
         logger.warning("教练大脑构建异常(降级为空)", exc_info=True)
         return "", None
+
+
+# —— v1.2.1 Phase A:统一多轮对话端点(候选深析对话化 / 持仓追问)——————————————
+
+@app.post(f"{API_PREFIX}/chat", dependencies=[Depends(require_token)])
+def chat(body: ChatRequest) -> dict:
+    """对话式深判(plan §4.1)。candidate 模式候选深析对话 / coach 模式持仓追问对话。
+
+    后端无状态:多轮历史由客户端每次全量回传(body.messages),不落库 thread。
+    coach 模式 position_id 指向的持仓不存在/已 closed → 404 not_holding;存在则
+    **以 pos["code"] 为准**(忽略 body.code,同现 /coach)。candidate 模式 name/sector
+    复用现成 _resolve_candidate_meta,客户端不传。
+
+    落库门槛(决定2 硬要求):仅当 is_first(messages 里 assistant 条数==0)且
+    mode=="candidate" 且 result 非降级时,才落 analysis_verdicts——降级"观望"绝不
+    覆盖真实 verdict 污染回测。上游失败仍 HTTP 200 返降级占位,绝不抛崩。
+    """
+    from datetime import date
+
+    bare = _bare_code(body.code)
+    pnl_pct: Optional[float] = None
+    trade_day: Optional[int] = None
+    name, sector = "", ""
+
+    if body.mode == "coach":
+        if body.position_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"ok": False, "reason": "not_holding"},
+            )
+        pos = store.get_position(body.position_id)
+        if pos is None or pos.get("status") != "holding":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"ok": False, "reason": "not_holding"},
+            )
+        bare = pos["code"]   # 以持仓 code 为准,忽略 body.code(同现 /coach)
+        name = pos.get("name", bare)
+        prices = _resolve_prices([bare])
+        price = prices.get(bare)
+        if price and pos["buy_price"]:
+            pnl_pct = round((price - pos["buy_price"]) / pos["buy_price"] * 100, 2)
+        trade_day = count_holding_trade_days(pos["buy_date"], date.today())
+    else:
+        name, sector = _resolve_candidate_meta(bare)
+
+    # 教练大脑:只取中性 history_digest,丢弃带情绪的 review_ref(守味隔离铁律)。
+    history_digest, _ = _coach_brain(bare)
+
+    is_first = sum(1 for m in body.messages if m.role == "assistant") == 0
+    messages_payload = [{"role": m.role, "content": m.content} for m in body.messages]
+
+    result = _chat_fn(
+        bare, messages_payload, mode=body.mode, name=name, sector=sector,
+        pnl_pct=pnl_pct, trade_day=trade_day, history_digest=history_digest,
+    )
+
+    if is_first and body.mode == "candidate" and not result["degraded"]:
+        _maybe_persist_verdict(bare, {"verdict": result["verdict"]})
+
+    return {
+        "ok": True,
+        "code": bare,
+        "reply": result["reply"],
+        "verdict": result["verdict"],
+        "fund_asof": result["fund_asof"],
+        "is_first": is_first,
+        "degraded": result["degraded"],
+    }
+
+
+def _default_chat_fn(code, messages, *, mode, name, sector, pnl_pct, trade_day, history_digest):
+    from app.llm.analyze import chat_stock
+    return chat_stock(
+        code, messages, mode=mode, name=name, sector=sector,
+        pnl_pct=pnl_pct, trade_day=trade_day, history_digest=history_digest,
+    )
+
+
+# 可注入测试替身(避免单测联网/真调 DeepSeek+Tushare),同 _analyze_fn 模式。
+_chat_fn = _default_chat_fn
 
 
 # —— F4 回测统计只读端点(阶段2.5,仅供调试/未来前端,本版本不接客户端)—————————

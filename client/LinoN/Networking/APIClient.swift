@@ -159,6 +159,40 @@ private struct CoachResponse: Decodable {
     let review_ref: String?   // 可选(无历史破线笔则后端省略此字段)
 }
 
+// MARK: - v1.2.1 Phase C:对话式深判(POST /api/v1/chat,plan §4.1)
+
+/// 对话历史单条消息(OpenAI 风格,role 仅 user/assistant,同后端 ChatMessageIn)。
+struct ChatTurn: Encodable {
+    let role: String
+    let content: String
+}
+
+struct ChatRequestBody: Encodable {
+    let mode: String            // "candidate" | "coach"
+    let code: String
+    let messages: [ChatTurn]
+    let position_id: Int?
+}
+
+/// POST /chat 响应(plan §4.1)。
+struct ChatResult {
+    let reply: String
+    let verdict: Verdict
+    let fundAsof: String
+    let isFirst: Bool
+    let degraded: Bool
+}
+
+private struct ChatResponse: Decodable {
+    let ok: Bool
+    let code: String
+    let reply: String
+    let verdict: Verdict
+    let fund_asof: String
+    let is_first: Bool
+    let degraded: Bool
+}
+
 // MARK: - 阶段3:复盘 / 记忆(plan §4.3)
 
 /// GET /review 响应(camelCase,逐字段对齐 Models.swift Review + openHoldings)。
@@ -354,6 +388,16 @@ actor APIClient {
         return CoachResult(advice: resp.advice, reason: resp.reason,
                            analysis: resp.analysis, fundAsof: resp.fund_asof,
                            reviewRef: resp.review_ref)
+    }
+
+    // —— v1.2.1 Phase C:对话式深判(POST /chat;candidate=候选深析对话 / coach=持仓追问)——
+    //     后端对话生成常 15–25s(决定7 专属 25s×2 重试预算),客户端 timeout 60s 兜底。
+    func chat(mode: String, code: String, messages: [ChatTurn], positionId: Int? = nil) async throws -> ChatResult {
+        let body = ChatRequestBody(mode: mode, code: code, messages: messages, position_id: positionId)
+        let data = try await post("/api/v1/chat", body: body, timeout: 60)
+        let resp = try JSONDecoder().decode(ChatResponse.self, from: data)
+        return ChatResult(reply: resp.reply, verdict: resp.verdict, fundAsof: resp.fund_asof,
+                          isFirst: resp.is_first, degraded: resp.degraded)
     }
 
     // —— 阶段3:拉周复盘(GET /review?week=;缺 week → 本周实时聚合)——

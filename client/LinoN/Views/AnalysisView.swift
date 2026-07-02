@@ -3,10 +3,10 @@
 //  LinoN — 深度分析 / 对话(双端;照 README §3)
 //
 //  全屏(iOS 隐藏 TabBar via fullScreenCover / macOS 覆盖内容区)。
-//  顶部返回 + 股票上下文条 + 聊天 thread + 底部 composer。
-//  四类消息(ChatRole):user 蓝气泡 / assistant 白气泡+◆ / analysis 结构化深析卡
-//  (三轴 pill + verdict 渐变区 + plan,可进附「全仓买入并录入」绿按钮)/ coach 红橙卡。
-//  深析卡显著标注 fund_asof(资金面=截至 {date} EOD,今日盘中资金未知)。
+//  顶部返回 + 股票上下文条 + 资金时序标注 + 聊天 thread + 底部 composer。
+//  v1.2.1 起对话化:user 蓝气泡 / assistant 白气泡+◆(自由中文分析,首条深析气泡下若
+//  verdict==可进 附「全仓买入并录入」按钮组)/ coach 红橙卡(触损专属,走 /coach 端点不变)。
+//  `.analysis` case 为 v1.2.1 前遗留(死代码,DeepAnalysisCard 本体保留供 SnapshotRenderTests)。
 //
 
 import SwiftUI
@@ -18,6 +18,7 @@ struct AnalysisView: View {
     var body: some View {
         VStack(spacing: 0) {
             contextBar
+            fundAsofBanner
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
@@ -87,14 +88,32 @@ struct AnalysisView: View {
         .overlay(Divider().overlay(LN.hairline), alignment: .bottom)
     }
 
+    /// v1.2.1 C4③:资金时序标注移到对话区顶部、持续可见(不再依赖 DeepAnalysisCard)。
+    @ViewBuilder
+    private var fundAsofBanner: some View {
+        if !model.fundAsof.isEmpty {
+            HStack(spacing: 5) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(LN.textTertiary)
+                Text("资金面 = 截至 \(model.fundAsof) EOD · 东财主力口径(非盘中实时)")
+                    .font(.system(size: 10.5)).foregroundStyle(LN.textTertiary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, compact ? 14 : 22)
+            .padding(.vertical, 7)
+            .background(LN.pageBg)
+            .overlay(Divider().overlay(LN.hairline), alignment: .bottom)
+        }
+    }
+
     // MARK: - 消息分发
 
     @ViewBuilder
     private func messageView(_ msg: ChatMessage) -> some View {
         switch msg.role {
         case .user:      userBubble(msg.text)
-        case .assistant: assistantBubble(msg.text)
-        case .analysis:  analysisBlock(msg)
+        case .assistant: assistantBubble(msg)
+        case .analysis:  EmptyView()   // v1.2.1 起死代码:候选深析已对话化,coach 触损走 .coach 不走此分支
         case .coach:     coachBlock(msg)
         }
     }
@@ -115,60 +134,48 @@ struct AnalysisView: View {
         .padding(.vertical, 8)
     }
 
-    private func assistantBubble(_ text: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            CoachAvatar(size: 30)
-            Text(text)
-                .font(.system(size: 13.5)).foregroundStyle(LN.textPrimary)
-                .lineSpacing(3)
-                .padding(.horizontal, 16).padding(.vertical, 13)
-                .background(
-                    UnevenRoundedRectangle(cornerRadii: .init(topLeading: 4, bottomLeading: 16,
-                                                              bottomTrailing: 16, topTrailing: 16))
-                        .fill(LN.cardBg)
-                )
-                .overlay(
-                    UnevenRoundedRectangle(cornerRadii: .init(topLeading: 4, bottomLeading: 16,
-                                                              bottomTrailing: 16, topTrailing: 16))
-                        .stroke(LN.hairline, lineWidth: 0.5)
-                )
-            Spacer(minLength: 40)
+    private func assistantBubble(_ msg: ChatMessage) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                CoachAvatar(size: 30)
+                Text(msg.text)
+                    .font(.system(size: 13.5)).foregroundStyle(LN.textPrimary)
+                    .lineSpacing(3)
+                    .padding(.horizontal, 16).padding(.vertical, 13)
+                    .background(
+                        UnevenRoundedRectangle(cornerRadii: .init(topLeading: 4, bottomLeading: 16,
+                                                                  bottomTrailing: 16, topTrailing: 16))
+                            .fill(LN.cardBg)
+                    )
+                    .overlay(
+                        UnevenRoundedRectangle(cornerRadii: .init(topLeading: 4, bottomLeading: 16,
+                                                                  bottomTrailing: 16, topTrailing: 16))
+                            .stroke(LN.hairline, lineWidth: 0.5)
+                    )
+                Spacer(minLength: 40)
+            }
+            // v1.2.1 决定5/C4②:首条 assistant 气泡 + verdict==可进 + 候选模式 → 买入按钮组。
+            // firstVerdict/firstAssistantMsgId 只在 isFirst 时写,追问翻脸不影响该判定。
+            if msg.id == model.firstAssistantMsgId, model.firstVerdict == .enter,
+               model.holding(byCode: model.selectedCode ?? "") == nil,
+               model.candidate(byCode: model.selectedCode ?? "") != nil {
+                HStack(spacing: 10) {
+                    Button(action: { model.buyFromAnalysis() }) {
+                        Text("全仓买入并录入")
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                            .padding(.horizontal, 18).padding(.vertical, 10)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(LN.up))
+                    }
+                    .buttonStyle(.plain)
+                    Text("看下一只")
+                        .font(.system(size: 13, weight: .medium)).foregroundStyle(LN.textSecondary)
+                        .padding(.horizontal, 18).padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(LN.textSecondary.opacity(0.06)))
+                }
+                .padding(.leading, 42)
+            }
         }
         .padding(.vertical, 8)
-    }
-
-    // MARK: - analysis 结构化深析卡
-
-    @ViewBuilder
-    private func analysisBlock(_ msg: ChatMessage) -> some View {
-        if let a = msg.analysis {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 12) {
-                    CoachAvatar(size: 30)
-                    DeepAnalysisCard(analysis: a, fundAsof: model.fundAsof, compact: compact)
-                    Spacer(minLength: compact ? 0 : 30)
-                }
-                // 可进 → 「全仓买入并录入」绿按钮(候选模式 + 当前为候选)
-                if model.chatMode == .analyze, a.verdict == .enter,
-                   model.candidate(byCode: model.selectedCode ?? "") != nil {
-                    HStack(spacing: 10) {
-                        Button(action: { model.buyFromAnalysis() }) {
-                            Text("全仓买入并录入")
-                                .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                                .padding(.horizontal, 18).padding(.vertical, 10)
-                                .background(RoundedRectangle(cornerRadius: 10).fill(LN.up))
-                        }
-                        .buttonStyle(.plain)
-                        Text("看下一只")
-                            .font(.system(size: 13, weight: .medium)).foregroundStyle(LN.textSecondary)
-                            .padding(.horizontal, 18).padding(.vertical, 10)
-                            .background(RoundedRectangle(cornerRadius: 10).fill(LN.textSecondary.opacity(0.06)))
-                    }
-                    .padding(.leading, 42)
-                }
-            }
-            .padding(.vertical, 9)
-        }
     }
 
     // MARK: - coach 反情绪教练红橙卡
@@ -261,9 +268,9 @@ struct AnalysisView: View {
                 .font(.system(size: 13.5)).foregroundStyle(LN.textPrimary)
                 #if os(iOS)
                 .submitLabel(.send)
-                .onSubmit { model.sendComposer() }
+                .onSubmit { Task { await model.sendComposer() } }
                 #endif
-            Button(action: { model.sendComposer() }) {
+            Button(action: { Task { await model.sendComposer() } }) {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                     .frame(width: 32, height: 32)

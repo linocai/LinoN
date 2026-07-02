@@ -96,10 +96,13 @@ final class AnalysisStateTests: XCTestCase {
         XCTAssertEqual(m.form.reason, "低位平台突破")   // tag 非空 → 用 tag
     }
 
-    func testSendComposerAppendsUserThenAssistant() {
+    func testSendComposerAppendsUserThenAssistant() async {
+        // v1.2.1 C3:sendComposer 改 async 真接 /chat;无 clientProvider → runChat 走
+        // "未配置后端连接" 降级路径,仍应追加 user + assistant 两条(验证状态机不变,不验证真回复内容)。
         let m = AppModel()
+        m.selectedCode = "603606"
         m.composer = "这只能进吗"
-        m.sendComposer()
+        await m.sendComposer()
         XCTAssertEqual(m.thread.count, 2)
         XCTAssertEqual(m.thread[0].role, .user)
         XCTAssertEqual(m.thread[0].text, "这只能进吗")
@@ -107,11 +110,19 @@ final class AnalysisStateTests: XCTestCase {
         XCTAssertEqual(m.composer, "")           // 发送后清空
     }
 
-    func testSendComposerIgnoresBlank() {
+    func testSendComposerIgnoresBlank() async {
         let m = AppModel()
+        m.selectedCode = "603606"
         m.composer = "   "
-        m.sendComposer()
+        await m.sendComposer()
         XCTAssertTrue(m.thread.isEmpty)
+    }
+
+    func testSendComposerIgnoresWhenNoSelectedCode() async {
+        let m = AppModel()
+        m.composer = "这只能进吗"
+        await m.sendComposer()
+        XCTAssertTrue(m.thread.isEmpty)   // 无 selectedCode → 不发送(mode 判定需要 code)
     }
 
     func testBackFromAnalysisResets() {
@@ -121,11 +132,89 @@ final class AnalysisStateTests: XCTestCase {
         m.composer = "draft"
         m.analysisContext = AnalysisContext(name: "x", code: "1", price: 1, chg: "+1%",
                                             chgIsUp: true, meta: "", hint: "")
+        m.firstVerdict = .enter
+        m.firstAssistantMsgId = UUID()
         m.backFromAnalysis()
         XCTAssertFalse(m.inAnalysis)
         XCTAssertTrue(m.thread.isEmpty)
         XCTAssertNil(m.analysisContext)
         XCTAssertEqual(m.composer, "")
+        XCTAssertNil(m.firstVerdict)
+        XCTAssertNil(m.firstAssistantMsgId)
+    }
+}
+
+// MARK: - v1.2.1 Phase C:chatTurns(from:) 序列化 + 截断契约(plan §4.2 C3/C3-C4)
+
+@MainActor
+final class ChatTurnsSerializationTests: XCTestCase {
+
+    func testMapsFourRolesCorrectly() {
+        let m = AppModel()
+        let g = AnalysisAxis(value: "—", tone: .neutral, text: "")
+        let a = DeepAnalysis(form: g, fund: g, news: g, verdict: .watch, plan: "")
+        let thread: [ChatMessage] = [
+            ChatMessage(role: .user, text: "u1"),
+            ChatMessage(role: .assistant, text: "a1"),
+            ChatMessage(role: .coach, text: "c1", analysis: a),
+            ChatMessage(role: .analysis, analysis: a),   // 结构卡:跳过不序列化
+            ChatMessage(role: .user, text: "u2"),
+        ]
+        let turns = m.chatTurns(from: thread)
+        // .analysis 被跳过,其余四条收敛到 user/assistant 两值。
+        XCTAssertEqual(turns.count, 4)
+        XCTAssertEqual(turns[0].role, "user");      XCTAssertEqual(turns[0].content, "u1")
+        XCTAssertEqual(turns[1].role, "assistant"); XCTAssertEqual(turns[1].content, "a1")
+        XCTAssertEqual(turns[2].role, "assistant"); XCTAssertEqual(turns[2].content, "c1")  // .coach → assistant,content=text
+        XCTAssertEqual(turns[3].role, "user");      XCTAssertEqual(turns[3].content, "u2")
+        // 非法角色收敛:后端 Literal["user","assistant"],映射后不应出现其他值。
+        XCTAssertTrue(turns.allSatisfy { $0.role == "user" || $0.role == "assistant" })
+    }
+
+    func testTruncatesToLast16FromUserBoundary() {
+        let m = AppModel()
+        // 构造 20 条交替 user/assistant(10 轮),截断应保留最近 16 条且首条是 user。
+        var thread: [ChatMessage] = []
+        for i in 1...10 {
+            thread.append(ChatMessage(role: .user, text: "u\(i)"))
+            thread.append(ChatMessage(role: .assistant, text: "a\(i)"))
+        }
+        let turns = m.chatTurns(from: thread)
+        XCTAssertLessThanOrEqual(turns.count, 16)
+        XCTAssertEqual(turns.first?.role, "user")
+        // 必须保留最近一条 assistant(保证追问轮后端 is_first 恒 false)。
+        XCTAssertEqual(turns.last?.content, "a10")
+        // 20 条(u1..a10)取尾 16 条 = 从 u3 起(u1/a1/u2/a2 四条被砍),首条恰为 user 无需再修剪。
+        XCTAssertEqual(turns.first?.content, "u3")
+    }
+
+    func testTruncationTrimsLeadingAssistantToUserBoundary() {
+        let m = AppModel()
+        // 构造首条深析(user+assistant)+ 9 轮追问,共 20 条;suffix(16) 落点若非 user 需继续前修。
+        var thread: [ChatMessage] = [
+            ChatMessage(role: .user, text: "open"),
+            ChatMessage(role: .assistant, text: "open-reply"),
+        ]
+        for i in 1...9 {
+            thread.append(ChatMessage(role: .user, text: "u\(i)"))
+            thread.append(ChatMessage(role: .assistant, text: "a\(i)"))
+        }
+        // 共 20 条,尾 16 条从 index 4 开始 = u2(第二轮追问的 user),已是 user 边界,无需再修。
+        let turns = m.chatTurns(from: thread)
+        XCTAssertEqual(turns.count, 16)
+        XCTAssertEqual(turns.first?.role, "user")
+        XCTAssertEqual(turns.last?.role, "assistant")
+        XCTAssertEqual(turns.last?.content, "a9")
+    }
+
+    func testNoTruncationWhenUnder16() {
+        let m = AppModel()
+        let thread: [ChatMessage] = [
+            ChatMessage(role: .user, text: "hi"),
+        ]
+        let turns = m.chatTurns(from: thread)
+        XCTAssertEqual(turns.count, 1)
+        XCTAssertEqual(turns[0].role, "user")
     }
 }
 

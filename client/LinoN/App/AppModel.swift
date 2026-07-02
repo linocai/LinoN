@@ -101,6 +101,10 @@ final class AppModel {
     var analysisContext: AnalysisContext? = nil
     /// 当前深析卡的资金时序标注(显著展示;深判端点返回 fund_asof)。
     var fundAsof: String = ""
+    /// v1.2.1 Phase C:首条 assistant 气泡的 verdict/id(仅 isFirst==true 时写;追问轮不覆盖,
+    /// 防止追问翻"不进"时买入按钮回溯消失;backFromAnalysis 清空)。
+    var firstVerdict: Verdict? = nil
+    var firstAssistantMsgId: UUID? = nil
 
     // —— 阶段3:复盘 / 记忆 ——
     var review: Review? = nil
@@ -336,7 +340,7 @@ final class AppModel {
 
     // MARK: - 阶段2:深析 / 对话(AnalysisView)
 
-    /// 候选点深析 → 进全屏 + user 气泡 + on-demand 深判 analysis 卡。
+    /// 候选点深析 → 进全屏 + user 气泡 + /chat 对话式深判(v1.2.1 Phase C,自由文本非三轴卡)。
     func openAnalysis(code: String) async {
         guard let c = candidate(byCode: code) else { return }
         selectedCode = code
@@ -349,18 +353,25 @@ final class AppModel {
         )
         thread = [ChatMessage(role: .user, text: "分析一下\(c.name),这个位置能不能进?")]
         inAnalysis = true
-        await runAnalyze(code: code)
+        await runChat(mode: "candidate", code: code, positionId: nil)
     }
 
-    private func runAnalyze(code: String) async {
+    /// v1.2.1 Phase C:统一对话调用(候选深析首条 / composer 追问共用)。
+    /// 成功 → 追加 assistant 气泡 + 刷新 fundAsof;仅 isFirst 时写 firstVerdict/firstAssistantMsgId。
+    private func runChat(mode: String, code: String, positionId: Int?) async {
         guard let client = clientProvider() else {
             appendAssistant("未配置后端连接,无法发起深判。去设置填 API Token。"); return
         }
         analysisLoading = true
         do {
-            let r = try await client.analyzeCandidate(code: code)
+            let r = try await client.chat(mode: mode, code: code, messages: chatTurns(from: thread), positionId: positionId)
             self.fundAsof = r.fundAsof
-            thread.append(ChatMessage(role: .analysis, analysis: r.analysis))
+            let msg = ChatMessage(role: .assistant, text: r.reply)
+            thread.append(msg)
+            if r.isFirst {
+                firstVerdict = r.verdict
+                firstAssistantMsgId = msg.id
+            }
         } catch {
             appendAssistant("深判失败:\((error as? APIError)?.errorDescription ?? error.localizedDescription)")
         }
@@ -412,13 +423,39 @@ final class AppModel {
         analysisLoading = false
     }
 
-    /// 发送 composer 文本(本期回固定文案;真问答接 LLM 留阶段3)。
-    func sendComposer() {
+    /// 发送 composer 文本 → 真接 DeepSeek 多轮追问(v1.2.1 Phase C)。
+    /// mode 按业务状态判(持仓中间地带 → coach + positionId),不复用 UI 语义的 chatMode。
+    func sendComposer() async {
         let t = composer.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return }
+        guard !t.isEmpty, let code = selectedCode else { return }
         thread.append(ChatMessage(role: .user, text: t))
         composer = ""
-        appendAssistant("我先看量能和主力资金:只要缩量企稳、主力没撤,就还在买入逻辑里;真到 -5% 或第 4 日,按铁律走,别跟规则讲价。")
+        let holdingPos = holding(byCode: code)
+        let mode = holdingPos != nil ? "coach" : "candidate"
+        await runChat(mode: mode, code: code, positionId: holdingPos?.id)
+    }
+
+    /// v1.2.1 Phase C:thread → [ChatTurn] 序列化契约(纯函数,单测覆盖)。
+    /// .user→user / .assistant→assistant / .coach→assistant(content=text) / .analysis→跳过(结构卡无自然语言内容)。
+    /// 截断保留最近 8 轮(≤16 条),从 user 边界截起,且必须保留最近一条 assistant
+    /// (保证追问轮后端 is_first 判定恒 false)。后端 role 只认 user/assistant 两值,否则 422。
+    func chatTurns(from thread: [ChatMessage]) -> [ChatTurn] {
+        let mapped: [ChatTurn] = thread.compactMap { msg in
+            switch msg.role {
+            case .user:      return ChatTurn(role: "user", content: msg.text)
+            case .assistant: return ChatTurn(role: "assistant", content: msg.text)
+            case .coach:     return ChatTurn(role: "assistant", content: msg.text)
+            case .analysis:  return nil
+            }
+        }
+        let maxCount = 16
+        guard mapped.count > maxCount else { return mapped }
+        var truncated = Array(mapped.suffix(maxCount))
+        // 从 user 边界截起:丢弃开头非 user 的消息,避免 assistant 打头的畸形序列。
+        while let first = truncated.first, first.role != "user" {
+            truncated.removeFirst()
+        }
+        return truncated
     }
 
     private func appendAssistant(_ text: String) {
@@ -469,6 +506,8 @@ final class AppModel {
         analysisContext = nil
         composer = ""
         coachReviewRef = nil
+        firstVerdict = nil
+        firstAssistantMsgId = nil
     }
 
     // MARK: - 阶段3:复盘 / 记忆网络动作

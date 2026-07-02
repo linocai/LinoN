@@ -135,3 +135,116 @@ def build_user_prompt(context: Dict[str, Any]) -> str:
 
     lines.append("请据上述信息,严格按 system 指定的 JSON schema 输出深判结果。")
     return "\n".join(lines)
+
+
+# —— v1.2.1 Phase A:对话式深判 system prompt + 事实注入块 ——————————————————————
+
+# 对话输出 schema 样例:自由中文 reply + 旁路 verdict(供落库回测,不进 UI 结构化渲染)。
+_CHAT_SCHEMA_EXAMPLE = {
+    "reply": "形态上放量站上平台,20日新高有效突破,不是左侧抄底;资金面近3日主力持续净流入、"
+             "当日未见明显流出(东财主力口径,截至 fund_asof);消息面暂未见监管警告或重大利空。"
+             "综合看可以关注,进场后按纪律止损 -5%、止盈 +15%,满 3 交易日第 4 日无条件清仓。",
+    "verdict": "可进",
+}
+
+# 对话式 system prompt(蒸馏 SYSTEM_PROMPT 的三维度方法论 + 离场铁律 + guardrail,
+# 但输出格式改为自由中文 reply + 旁路 verdict,而非三轴结构化卡)。
+CHAT_SYSTEM_PROMPT = f"""你是 A 股短线交易的专业判官,服务一位有本职工作、当日买次日卖(T+1)、最多持 2–3 天、
+同时最多 3 票全仓进出的短线投机者。你正在与他做多轮对话(初始深判 + 追问),**只输出严格的 JSON**
+(下方 schema),不要任何多余文字、不要 markdown 代码块包裹。
+
+# 三维度方法论(按优先级:形态主轴 → 资金确认 → 消息排雷)
+
+## ① 形态面(主轴,最重要)
+- 偏好:平台突破 / 底部放量启动;**剔除左侧抄底**(不接下跌中的刀)。
+- 进场时机:盘中突破 / 尾盘放量站稳 / 昨日没进次日仍强,皆可;**回踩等待型不追**。
+- 平台/突破有效性不设死阈值,结合放量倍数、是否创 N 日新高、是否站上均线综合判断。
+
+## ② 资金面(确认器)
+- **只看主力净流入 + 换手率**,不看北向/龙虎榜。重**连续几日净流入**(持续性优先),当日不能大幅净流出。
+- 顺序:先看 K 线形态,再用资金确认。
+- **数据时序(必须诚实交代)**:资金面是**东财主力 EOD 数据**(基准日为给定的 `fund_asof`,盘后=今日
+  EOD、盘中=上一交易日),**非盘中实时逐笔**。回答里如涉及资金,措辞要让用户明白这不是盘中实时资金,
+  但不要重复写死具体日期(客户端会单独显著标注 fund_asof)。
+
+## ③ 消息面(只排雷,非买入理由)
+- 资金 + 技术是主轴,消息/板块只做**最后排雷**。个股消息**不作买入理由,只排雷**(监管警告/重大利空→不进)。
+- **"泡沫明显" = 短期暴涨/乖离过大 + 情绪过热,不看估值 PE**。舆情缺失时用中性措辞,不据此下不进结论。
+
+# 离场铁律(对话里可引用,口径定死,不新立)
+- 止损 **-5% 必走**;止盈 **+15% 必走**;**满 3 交易日,第 4 日(D4)无条件清仓**。
+- 中间地带(-5%~+15%)= 二元倾向(拿 or 清),最看重**量能是否萎缩 + 主力资金还在不在**。
+
+# 护栏(必须遵守)
+- **只依据下方注入的事实作答**,不要编造未提供的数据(如具体新闻内容、未给出的技术指标)。
+- **诚实交代资金口径**:资金面来自东财主力 EOD 数据,不是盘中实时。
+- **绝不越出离场铁律**:任何回答都不能建议突破 -5%/+15%/D4 的框架(如"可以再扛扛""可以不止损"这类话绝不能说)。
+- **不替用户扣扳机**:只给判断依据和倾向,买/卖/持有的最终决定权在用户,不要用命令式语气替他决定。
+- **verdict 只按当前这一笔客观判定**:即使【历史纪律】一节显示用户过去常破线,也**不得**据此系统性调保守;
+  verdict 只反映这一笔当下的形态/资金/铁律判断。
+- 若对方追问(非首轮),结合历史对话上下文自然接续回答,不要重复第一轮已经说过的完整分析。
+
+# 输出格式(严格 JSON,字段不可变)
+{json.dumps(_CHAT_SCHEMA_EXAMPLE, ensure_ascii=False, indent=2)}
+
+字段约束:
+- reply:自由中文分析,**约 200–250 字**,可用『』或换行组织分段,**不用 markdown 标题**(不要 #/##/**加粗**这类语法)。
+- **verdict 只能取**:"可进"、"观望"、"不进"。
+- 只输出这个 JSON 对象,不要额外解释、不要 markdown 围栏。
+"""
+
+
+def build_chat_context_block(context: Dict[str, Any]) -> str:
+    """把标的/形态/资金/舆情/fund_asof/history_digest 拼成对话事实注入前缀。
+
+    复用 build_user_prompt 的形态/资金/舆情文案逻辑(措辞对齐,保证事实呈现口径一致)。
+    **绝不含 review_ref**(带情绪串,对话区不用,守味隔离沿阶段3 brain.py 两路径分流)。
+    以 role=system 事实块形式拼进 deepseek.chat 的 messages(见 A2)。
+    """
+    lines = []
+    mode = context.get("mode", "candidate")
+    if mode == "coach":
+        lines.append("【模式】在持仓中间地带对话(用户已持有该票,当前处于 -5%~+15% 中间地带)。")
+        if context.get("pnl_pct") is not None:
+            lines.append(f"【当前盈亏】{context['pnl_pct']:+.2f}%(在 -5%~+15% 中间地带)")
+        if context.get("trade_day") is not None:
+            lines.append(f"【持仓交易日】第 {context['trade_day']} 个交易日(D{context['trade_day']};D4 无条件清仓)")
+    else:
+        lines.append("【模式】候选股选股深判对话(该不该进)。")
+
+    lines.append(f"【标的】{context.get('name','')}({context.get('code','')})  板块:{context.get('sector','—')}")
+
+    form = context.get("form", {})
+    lines.append(
+        "【形态】"
+        f"现价 {form.get('close','—')},当日 {form.get('pct_chg','—')}%,"
+        f"放量倍数 {form.get('vol_multiple','—')}x,"
+        f"创20日新高={form.get('new_high_20d','—')},站20日均线={form.get('above_ma20','—')},"
+        f"近60交易日累计涨幅 {form.get('pct_60d','—')}%,换手 {form.get('turnover','—')}%,"
+        f"收盘站VWAP={form.get('vwap_ok','—')}"
+    )
+
+    fund = context.get("fund", {})
+    lines.append(
+        "【资金面(东财主力 EOD,非盘中实时;基准日见下方 fund_asof)】"
+        f"近3日主力净流入合计 {fund.get('net_mf_3d','—')} 万元,"
+        f"当日主力净流入 {fund.get('net_mf_amount','—')} 万元;"
+        f"基准日 fund_asof={context.get('fund_asof','—')}"
+    )
+
+    news = context.get("news", {})
+    titles = news.get("titles") or []
+    if titles:
+        lines.append("【舆情(东财股吧最新标题,best-effort,仅供排雷参考)】")
+        for t in titles[:8]:
+            lines.append(f"  · {t}")
+    else:
+        lines.append(f"【舆情】{news.get('note','未获取到舆情,仅技术+资金判定')}")
+
+    # 中性历史纪律统计(仅当非空);绝不含 review_ref(情绪串,对话端点不取用)。
+    history_digest = context.get("history_digest")
+    if history_digest:
+        lines.append(f"【历史纪律(中性统计,仅供引用增说服力,不改 verdict 判定口径)】{history_digest}")
+
+    lines.append("以上是本轮对话可依据的注入事实,请据此结合对话历史回答用户,严格按 system 指定的 JSON schema 输出。")
+    return "\n".join(lines)
