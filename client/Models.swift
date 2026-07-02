@@ -131,6 +131,7 @@ struct Candidate: Identifiable, Codable {
     var flow: String                 // 主力净流入
     var turnover: String             // 换手
     var warn: String?                // 高位警告降级(非空则降级展示)
+    var score: Int? = nil            // 阶段3.1:当日候选池相对分 0–100(展示;可选,前向兼容旧后端)
     var analysis: DeepAnalysis
 }
 

@@ -238,14 +238,18 @@ struct CandidatesExplainBar: View {
             // 旧版与两个定宽(.fixedSize)pill 挤一个 HStack,窄屏 pill 抢光宽度→ headline 被压成一字一行竖排。
             VStack(alignment: .leading, spacing: 10) {
                 headlineText.frame(maxWidth: .infinity, alignment: .leading)
+                scoreNote                 // 阶段3.1:相对分说明(可换行文本,避开窄屏 pill 换行坑)
                 pills
             }
             #else
             // macOS 宽屏:headline 左、pill 右横排(放得下,保持原设计)。
-            HStack(alignment: .center, spacing: 12) {
-                headlineText
-                Spacer(minLength: 8)
-                pills
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center, spacing: 12) {
+                    headlineText
+                    Spacer(minLength: 8)
+                    pills
+                }
+                scoreNote                 // 阶段3.1:相对分说明
             }
             #endif
         }
@@ -258,6 +262,14 @@ struct CandidatesExplainBar: View {
         Text(headline)
             .font(.system(size: 13)).foregroundStyle(LN.textPrimary)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// 阶段3.1:相对分护栏文案。走可换行 Text(非定宽 pill),避开阶段2 已修的窄屏 pill 换行坑。
+    private var scoreNote: some View {
+        Text("分数为当日候选池内相对评分,不同日期不可横向比较。")
+            .font(.system(size: 11)).foregroundStyle(LN.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var pills: some View {
@@ -313,7 +325,10 @@ struct CandidateRow: View {
 
     private var iosRow: some View {
         HStack(spacing: 13) {
-            rankChip
+            VStack(spacing: 5) {
+                rankChip
+                scoreBadge            // 阶段3.1:分数徽章置于 rank chip 下方(窄屏不抢中列宽)
+            }
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 6) {
                     Text(c.name).font(.system(size: 14.5, weight: .semibold))
@@ -387,6 +402,7 @@ struct CandidateRow: View {
             Text(c.turnover)
                 .font(.system(size: 13).monospacedDigit()).foregroundStyle(LN.textSecondary)
                 .frame(width: 56, alignment: .trailing)
+            scoreBadge.frame(width: 54, alignment: .trailing)   // 阶段3.1:分数窄列(nil 时空)
             analyzeButton.frame(width: 70, alignment: .trailing)
         }
         .padding(.horizontal, 16).padding(.vertical, 15)
@@ -412,6 +428,23 @@ struct CandidateRow: View {
                     }
                 }
             )
+    }
+
+    /// 阶段3.1 当日相对分徽章(0–100)。score 为 nil 时不显示(前向兼容旧后端,布局不塌)。
+    /// 风格贴近现有数值元素:monospacedDigit,rank1 用 accent 高亮,余票中性。
+    @ViewBuilder private var scoreBadge: some View {
+        if let s = c.score {
+            HStack(spacing: 2) {
+                Text("\(s)")
+                    .font(.system(size: compact ? 11 : 12, weight: .bold).monospacedDigit())
+                Text("分")
+                    .font(.system(size: compact ? 8.5 : 9, weight: .semibold))
+                    .baselineOffset(-0.5)
+            }
+            .foregroundStyle(rankIsFirst ? LN.accent : LN.textSecondary)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Capsule().fill(rankIsFirst ? LN.accent.opacity(0.10) : LN.chipNeutral))
+        }
     }
 
     @ViewBuilder private var warnOrSector: some View {

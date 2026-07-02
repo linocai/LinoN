@@ -35,6 +35,8 @@ class FormResult:
     new_high_20d: bool = False        # 创 20 日新高(复权后价)
     above_ma20: bool = False          # 站上 20 日均线(复权后价)
     pct_60d: Optional[float] = None   # 近 60 交易日累计涨幅 %(复权后价)
+    vwap_ok: bool = False             # 收盘站当日 VWAP(信号1;缺 amount → 保守 False)
+    had_limit_up: bool = False        # 近 N 日(排除今日)有涨停(信号5;数据不足 → False)
 
 
 def qfq_closes(raw_closes: List[float], adj_factors: List[Optional[float]]) -> List[float]:
@@ -62,6 +64,7 @@ def qfq_closes(raw_closes: List[float], adj_factors: List[Optional[float]]) -> L
 def compute_form(
     closes_new_to_old: List[float],
     vols_new_to_old: List[float],
+    amounts_new_to_old: Optional[List[float]] = None,
 ) -> FormResult:
     """从近 N 日【已复权】收盘价序列 + 原始成交量序列(均新→旧)算形态。
 
@@ -73,6 +76,16 @@ def compute_form(
       · 站上 N 日均线:ma_window = closes[:rules.MA_DAYS](引用常量,不硬编 20)。
       · 60 日基准:base_idx = min(60, len(closes)-1)。
     数据不足 → 各字段保守退化(vol_multiple=0/new_high=False/pct_60d=None),不崩。
+
+    阶段3.1 新增(plan §4.0/§4.1,只新增一个可选入参 amounts_new_to_old):
+      · vwap_ok(信号1):仅当 amounts 传入且 vols[0]>0(除零守卫,停牌/异常行退化 False)
+        才算;vwap = amounts[0]×1000 / (vols[0]×100)(千元→元、手→股),vwap_ok =
+        closes[0] >= vwap(用复权后 close;amount/vol 是当日绝对量、不复权不受影响)。
+        缺 amounts(None)→ vwap_ok 恒 False(向后兼容旧调用点)。
+      · had_limit_up(信号5):从【已复权】closes 逐日内部派生 pct 序列(不新增入参、
+        不用原始 daily.pct_chg——复权序列消除除权跳变、不产假涨停,plan §4.0 🟡#2),
+        扫【排除今日】的 pct[1 : 1+ACTIVE_LOOKBACK_DAYS](🟡#1;index 0 是今天),
+        任一 >= rules.LIMIT_UP_PCT → True。数据不足 → False。
     """
     result = FormResult()
     if not closes_new_to_old:
@@ -112,5 +125,29 @@ def compute_form(
         base = closes_new_to_old[base_idx]
         if base > 0:
             result.pct_60d = round((today_close - base) / base * 100, 2)
+
+    # 收盘站 VWAP(信号1):仅当 amounts 传入且当日 vol>0(除零守卫)才算,否则保守 False
+    if amounts_new_to_old and vols_new_to_old and vols_new_to_old[0] > 0:
+        today_amount = amounts_new_to_old[0]  # 千元
+        today_vol = vols_new_to_old[0]         # 手
+        vwap = (today_amount * 1000.0) / (today_vol * 100.0)  # 元/股
+        if vwap > 0:
+            result.vwap_ok = today_close >= vwap
+
+    # 近期活跃 had_limit_up(信号5):从复权 closes 逐日派生 pct,扫排除今日的窗口
+    # pct[i] = (closes[i]-closes[i+1])/closes[i+1];窗口 = pct[1 : 1+N](排除今日 index0,
+    # 上界 1+N 不含端点 → i 取 1..N;每个 i 需 closes[i+1] 存在,即 i+1 <= n_close-1)。
+    n_close = len(closes_new_to_old)
+    lookback_end = 1 + rules.ACTIVE_LOOKBACK_DAYS  # slice 上界(不含),i ∈ [1, lookback_end)
+    for i in range(1, lookback_end):
+        if i + 1 > n_close - 1:      # closes[i+1] 不存在 → 数据不足,停
+            break
+        prev = closes_new_to_old[i + 1]
+        if prev <= 0:
+            continue
+        pct = (closes_new_to_old[i] - prev) / prev * 100.0
+        if pct >= rules.LIMIT_UP_PCT:
+            result.had_limit_up = True
+            break
 
     return result

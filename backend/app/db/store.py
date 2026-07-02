@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS trades (
     pnl         REAL    NOT NULL,             -- 百分比收益(close-open)/open*100
     broke_rule  INTEGER NOT NULL,             -- bool(标红依据)
     created_at  TEXT    NOT NULL
+    -- name/note 两列由 _ensure_trades_columns() 迁移补充(阶段3,ALTER ADD COLUMN,不在此 DDL)
 );
 
 CREATE TABLE IF NOT EXISTS reviews (
@@ -123,6 +124,7 @@ CREATE TABLE IF NOT EXISTS candidates (
     warn         TEXT,                        -- 高位警告降级(≥50% 时非空)
     created_at   TEXT    NOT NULL,
     UNIQUE(trade_date, code)
+    -- score 列由 _ensure_candidates_columns() 迁移补充(阶段3.1,ALTER ADD COLUMN,不在此 DDL)
 );
 
 CREATE TABLE IF NOT EXISTS candidate_outcomes (
@@ -187,13 +189,35 @@ def _ensure_trades_columns(conn: sqlite3.Connection) -> None:
         log.error("trades 补列(name/note)迁移异常(已吞,不拖垮 startup)", exc_info=True)
 
 
+def _ensure_candidates_columns(conn: sqlite3.Connection) -> None:
+    """给 candidates 表补 score 列(阶段3.1,项目第二次真 migration,高危区)。
+
+    与 _ensure_trades_columns 完全同套姿势:PRAGMA table_info 精确集合探测缺 score 则
+    ALTER TABLE ADD COLUMN;整段 try/except **只 log.error,不 re-raise**——init_db 跑在
+    app.py lifespan 启动路径、每次 ECS 重启都执行,一个展示列的迁移绝不能拖垮整个交易
+    监控服务的 startup(score 缺了候选照跑,只是不显示分数)。
+
+    **为何 ALTER 不 DROP**(plan §4.1 否决方案②):pending_backfill_entries 的回填扫描
+    FROM candidates LEFT JOIN candidate_outcomes 读 candidates 表**历史行**找未回填样本,
+    DROP 重建会丢掉"已产候选但回测未回填(entry_date 距今不足 4 交易日)"的历史行,导致
+    这批候选的回测样本永久丢失。故 candidates 表历史行不可 DROP,必须走 ALTER 保留历史。
+    """
+    try:
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(candidates)")}  # row[1] = 列名
+        if "score" not in existing:
+            conn.execute("ALTER TABLE candidates ADD COLUMN score INTEGER")
+    except Exception:
+        log.error("candidates 补列(score)迁移异常(已吞,不拖垮 startup)", exc_info=True)
+
+
 def init_db(db_path: Optional[str] = None) -> str:
-    """建四表(幂等)+ trades 补列迁移。返回落库路径。"""
+    """建表(幂等)+ trades/candidates 补列迁移。返回落库路径。"""
     path = _db_path(db_path)
     conn = get_connection(path)
     try:
         conn.executescript(_SCHEMA)
-        _ensure_trades_columns(conn)   # 阶段3 G3:trades 补 name/note(幂等,失败不拖垮)
+        _ensure_trades_columns(conn)        # 阶段3 G3:trades 补 name/note(幂等,失败不拖垮)
+        _ensure_candidates_columns(conn)    # 阶段3.1:candidates 补 score(幂等,失败不拖垮)
         conn.commit()
     finally:
         conn.close()
@@ -658,8 +682,8 @@ def upsert_candidates(
             conn.execute(
                 """INSERT INTO candidates
                    (trade_date, rank, code, name, sector, tag, price, chg,
-                    vol_multiple, vol_pct, flow, turnover, warn, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    vol_multiple, vol_pct, flow, turnover, warn, score, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trade_date,
                     int(r.get("rank", 0)),
@@ -674,6 +698,7 @@ def upsert_candidates(
                     r.get("flow"),
                     r.get("turnover"),
                     r.get("warn"),
+                    int(r.get("score", 0)),   # 阶段3.1:pipeline 一定带 score,缺省兜底 0
                     now,
                 ),
             )
@@ -711,6 +736,9 @@ def list_candidates(trade_date: str, db_path: Optional[str] = None) -> List[Dict
             "volPct": d.get("vol_pct") or 0,
             "flow": d.get("flow") or "",
             "turnover": d.get("turnover") or "",
+            # 阶段3.1:score 展示分。旧行(迁移前写入)score=NULL → 回读兜底 0 不崩
+            # (客户端旧行显示 0 分属预期,这些是待回填的历史缓存、不在当前推荐列表)。
+            "score": d.get("score") if d.get("score") is not None else 0,
         }
         if d.get("warn"):
             cand["warn"] = d["warn"]

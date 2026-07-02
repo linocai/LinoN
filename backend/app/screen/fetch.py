@@ -124,6 +124,8 @@ class StockRow:
     pct_60d: Optional[float] = None  # 近 60 交易日累计涨幅 %
     new_high_20d: bool = False     # 创 20 日新高
     above_ma20: bool = False       # 站上 20 日均线
+    vwap_ok: bool = False          # 收盘站当日 VWAP(阶段3.1 信号1)
+    had_limit_up: bool = False     # 近 N 日(排除今日)有涨停(阶段3.1 信号5)
 
 
 @dataclass
@@ -203,6 +205,7 @@ def fetch_market_snapshot(trade_date_yyyymmdd: str) -> MarketSnapshot:
                     "close": float(r.get("close") or 0.0),
                     "vol": float(r.get("vol") or 0.0),
                     "pre_close": float(r.get("pre_close") or 0.0),
+                    "amount": float(r.get("amount") or 0.0),  # 千元(阶段3.1 信号1 VWAP)
                 }
             daily_by_date[d] = per
 
@@ -281,9 +284,11 @@ def _enrich_form(
     (等价旧行为,不崩)。dates 新→旧;daily_by_date[date][code] = {'close','vol','pre_close'}。
     """
     adj_by_date = adj_by_date or {}
-    # 本票历史序列(新→旧),只取有该 code 数据的交易日;同步取该日 adj_factor(缺则 None)
+    # 本票历史序列(新→旧),只取有该 code 数据的交易日;同步取该日 adj_factor(缺则 None)。
+    # amount(千元,阶段3.1 VWAP 信号1)从 daily record 取,缺键退化 0.0(旧测试无该键不崩)。
     raw_closes: List[float] = []
     vols: List[float] = []
+    amounts: List[float] = []
     adj_factors: List[Optional[float]] = []
     for d in dates:
         rec = daily_by_date.get(d, {}).get(code)
@@ -291,16 +296,19 @@ def _enrich_form(
             continue
         raw_closes.append(rec["close"])
         vols.append(rec["vol"])
+        amounts.append(float(rec.get("amount") or 0.0))
         adj_factors.append(adj_by_date.get(d, {}).get(code))
     if not raw_closes:
         return
 
-    # 只复权 close(vol 不动);缺因子退化 factor=1.0(qfq_closes 内部处理)。
+    # 只复权 close(vol/amount 不动,是当日绝对量);缺因子退化 factor=1.0(qfq_closes 内部处理)。
     closes = qfq_closes(raw_closes, adj_factors)
-    result = compute_form(closes, vols)
+    result = compute_form(closes, vols, amounts)
 
     sr.pct_chg = result.pct_chg
     sr.vol_multiple = result.vol_multiple
     sr.new_high_20d = result.new_high_20d
     sr.above_ma20 = result.above_ma20
     sr.pct_60d = result.pct_60d
+    sr.vwap_ok = result.vwap_ok
+    sr.had_limit_up = result.had_limit_up

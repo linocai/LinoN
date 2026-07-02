@@ -184,3 +184,46 @@ final class DeepAnalysisDecodeTests: XCTestCase {
         XCTAssertEqual(a.form.tone, .bad)
     }
 }
+
+// MARK: - 阶段3.1:Candidate.score 可选解码(前向兼容窗口期,plan §4.1 🟡#3)
+
+final class CandidateScoreDecodeTests: XCTestCase {
+
+    /// Candidate Codable body(含 analysis 结构,score 位置可选填)。
+    /// 注:Candidate 有 `var id = UUID()`,synthesized Codable 解码时该键必需 → JSON 带 id。
+    /// 本测试聚焦 score 可选性:score 键缺失时不抛(前向兼容),而非 id。
+    private func candidateJSON(withScore: Bool) -> Data {
+        let scoreLine = withScore ? "\"score\": 87,\n" : ""
+        return """
+        {
+          "id": "00000000-0000-0000-0000-000000000001",
+          "rank": 1, "name": "东方电缆", "code": "603606",
+          "sector": "海缆", "tag": "低位平台突破",
+          "price": 42.1, "chg": "+3.20%",
+          "volMultiple": "2.8x", "volPct": 90,
+          "flow": "+1.20亿", "turnover": "4.6%",
+          \(scoreLine)"analysis": {
+            "form": {"value": "—", "tone": "neutral", "text": ""},
+            "fund": {"value": "—", "tone": "neutral", "text": ""},
+            "news": {"value": "—", "tone": "neutral", "text": ""},
+            "verdict": "观望", "plan": ""
+          }
+        }
+        """.data(using: .utf8)!
+    }
+
+    func testDecodesCandidateWithScore() throws {
+        let c = try JSONDecoder().decode(Candidate.self, from: candidateJSON(withScore: true))
+        XCTAssertEqual(c.score, 87)          // 新后端带 score → 正确填入
+        XCTAssertEqual(c.code, "603606")
+    }
+
+    func testDecodesOldResponseWithoutScoreDoesNotFail() throws {
+        // 前向兼容:新客户端连旧后端(响应无 score 字段)→ 解码不失败、score=nil。
+        // 若 score 是非可选,这里会抛 keyNotFound → 整个候选列表解码失败、候选页全空。
+        let c = try JSONDecoder().decode(Candidate.self, from: candidateJSON(withScore: false))
+        XCTAssertNil(c.score)                // 缺字段 → nil,不抛
+        XCTAssertEqual(c.rank, 1)            // 其余字段照常解码
+        XCTAssertEqual(c.name, "东方电缆")
+    }
+}

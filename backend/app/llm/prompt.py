@@ -98,8 +98,16 @@ def build_user_prompt(context: Dict[str, Any]) -> str:
         f"现价 {form.get('close','—')},当日 {form.get('pct_chg','—')}%,"
         f"放量倍数 {form.get('vol_multiple','—')}x,"
         f"创20日新高={form.get('new_high_20d','—')},站20日均线={form.get('above_ma20','—')},"
-        f"近60交易日累计涨幅 {form.get('pct_60d','—')}%,换手 {form.get('turnover','—')}%"
+        f"近60交易日累计涨幅 {form.get('pct_60d','—')}%,换手 {form.get('turnover','—')}%,"
+        f"收盘站VWAP={form.get('vwap_ok','—')}"
     )
+    # 阶段3.1 信号2:量价形态吸筹/出货判定提示(仅 candidate 模式,不硬编阈值只加上下文)。
+    if mode != "coach":
+        lines.append(
+            "【量价形态判读要求】请结合放量倍数 + 当日涨幅 + 是否收盘站上 VWAP 判断量价形态属"
+            "吸筹(温和放量缓涨、收在均价之上,健康)还是出货(爆量暴拉 / 放巨量滞涨、收在均价"
+            "之下,危险):若判为出货形态,请相应降低 form 轴 tone 或把 verdict 转为观望。"
+        )
 
     fund = context.get("fund", {})
     lines.append(

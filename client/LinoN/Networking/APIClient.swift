@@ -105,6 +105,7 @@ private struct CandidateListDTO: Decodable {
     let flow: String
     let turnover: String
     let warn: String?
+    let score: Int?    // 阶段3.1:当日相对分(可选;新客户端连旧后端无此字段 → nil,前向兼容不解码失败)
 }
 
 private struct CandidatesListResponse: Decodable {
@@ -319,6 +320,7 @@ actor APIClient {
                       volMultiple: dto.volMultiple, volPct: dto.volPct,
                       flow: dto.flow, turnover: dto.turnover,
                       warn: (dto.warn?.isEmpty == false) ? dto.warn : nil,
+                      score: dto.score,   // 阶段3.1:可选;nil → CandidateRow 不显示徽章
                       analysis: placeholder)
         }
         return CandidatesResult(candidates: list, freeSlots: resp.free_slots,

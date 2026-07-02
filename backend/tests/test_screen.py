@@ -75,34 +75,120 @@ def test_truncation_limit():
 
 # —— rules:排序加权(放量权重最大)————————————————————————————————
 
-def test_rank_score_vol_is_single_largest_factor():
-    # 放量是单一最大权因子(0.4):其余三项相等、仅放量不同 → 放量高者得分高。
-    scores = rules.rank_score(
-        vol_multiples=[5.0, 1.5],
-        fund_3d=[100.0, 100.0],
-        turnovers=[3.0, 3.0],
-        pct_60ds=[10.0, 10.0],
+def _rank_score(vol, fund, turn, pct60, *, vwap=None, mv=None, active=None, day=None):
+    """阶段3.1 八参 rank_score 的测试辅助:新因子缺省给中性(不影响相对比较)。
+
+    vwap/active 缺省 False(0 分,等值不影响相对次序);mv 缺省 0(<=0 → 中性 0.5,
+    全相等不影响);day 缺省 0(无罚)。等长同序。
+    """
+    n = len(vol)
+    return rules.rank_score(
+        vol_multiples=vol, fund_3d=fund, turnovers=turn, pct_60ds=pct60,
+        vwap_oks=vwap if vwap is not None else [False] * n,
+        total_mv_yis=mv if mv is not None else [0.0] * n,
+        actives=active if active is not None else [False] * n,
+        day_pcts=day if day is not None else [0.0] * n,
     )
+
+
+def test_rank_score_vol_is_single_largest_factor():
+    # 放量是单一最大权因子(0.28):其余因子等值、仅放量不同 → 放量高者得分高。
+    scores = _rank_score([5.0, 1.5], [100.0, 100.0], [3.0, 3.0], [10.0, 10.0])
     assert scores[0] > scores[1]
 
 
 def test_rank_score_vol_outweighs_any_single_other():
-    # 放量权(0.4)大于任意单个其他因子权:A 仅放量满分,B 仅资金满分 → A 胜。
-    scores = rules.rank_score(
-        vol_multiples=[5.0, 1.5],   # A 放量满分,B 最低
-        fund_3d=[100.0, 999.0],     # B 资金满分,A 最低
-        turnovers=[3.0, 3.0],
-        pct_60ds=[10.0, 10.0],
+    # 放量权(0.28)大于任意单个其他正权因子:A 仅放量满分,B 仅资金满分 → A 胜。
+    scores = _rank_score(
+        [5.0, 1.5],       # A 放量满分,B 最低
+        [100.0, 999.0],   # B 资金满分,A 最低
+        [3.0, 3.0],
+        [10.0, 10.0],
     )
-    assert scores[0] > scores[1]    # 0.4(vol) > 0.25(fund)
+    assert scores[0] > scores[1]    # 0.28(vol) > 0.20(fund)
 
 
 def test_rank_score_empty():
-    assert rules.rank_score([], [], [], []) == []
+    assert rules.rank_score([], [], [], [], [], [], [], []) == []
 
 
-def test_weights_sum_to_one():
-    assert abs(sum(rules.WEIGHTS.values()) - 1.0) < 1e-9
+def test_rank_score_all_equal_neutral():
+    # 全相等输入(含新因子)→ 每票同分(_normalize 全 0.5 中性;新因子等值不产生区分度)。
+    scores = _rank_score([2.0, 2.0], [50.0, 50.0], [6.0, 6.0], [10.0, 10.0],
+                         vwap=[True, True], mv=[100.0, 100.0],
+                         active=[False, False], day=[3.0, 3.0])
+    assert scores[0] == scores[1]
+
+
+def test_rank_score_new_factors_shift_ranking():
+    # 两票放量/资金/换手/低位全相等,A 站 VWAP + 近期涨停,B 否 → A 分更高(信号1/5 生效)。
+    scores = _rank_score([2.0, 2.0], [50.0, 50.0], [6.0, 6.0], [10.0, 10.0],
+                         vwap=[True, False], active=[True, False])
+    assert scores[0] > scores[1]
+
+
+def test_rank_score_day_surge_is_penalty():
+    # 两票其余全等,A 今日暴涨(涨停)、B 温和 → A 被罚,分更低(信号6 负权)。
+    scores = _rank_score([2.0, 2.0], [50.0, 50.0], [6.0, 6.0], [10.0, 10.0],
+                         day=[9.8, 3.0])
+    assert scores[0] < scores[1]
+
+
+def test_weights_positive_sum_to_one():
+    # 正权之和 = 1.0(day_surge 是罚项 -0.06,不计入正权和)。
+    pos = sum(w for w in rules.WEIGHTS.values() if w > 0)
+    assert abs(pos - 1.0) < 1e-9
+    assert rules.WEIGHTS["day_surge"] < 0   # 罚项为负
+
+
+# —— rules:阶段3.1 评分函数边界(信号3/4/6)——————————————————————————
+
+def test_turnover_health_score_boundaries():
+    # 3% < 下沿5% → 衰减(<1);7% 落健康带 → 满分 1.0;15% > 上沿10% → 衰减(<1)。
+    assert rules.turnover_health_score(7.0) == 1.0        # 健康带满分
+    assert rules.turnover_health_score(5.0) == 1.0        # 下沿含端点
+    assert rules.turnover_health_score(10.0) == 1.0       # 上沿含端点
+    assert 0.0 < rules.turnover_health_score(3.0) < 1.0   # 过低衰减
+    assert 0.0 < rules.turnover_health_score(15.0) < 1.0  # 过高衰减
+    assert rules.turnover_health_score(0.0) == 0.0        # 无成交无共识
+    assert rules.turnover_health_score(-1.0) == 0.0       # 负值兜底
+    assert rules.turnover_health_score(20.0) == 0.0       # 2×上沿及以上 → 0
+    # 单调性:健康带外距离越远分越低
+    assert rules.turnover_health_score(11.0) > rules.turnover_health_score(14.0)
+
+
+def test_mv_elastic_score_boundaries():
+    # 10 亿(微盘<15)→ 0;50 亿(中小盘带)→ 满分;800 亿(超大盘>500)→ 0。
+    assert rules.mv_elastic_score(50.0) == 1.0            # 中小盘满分带
+    assert rules.mv_elastic_score(20.0) == 1.0            # 下沿含端点
+    assert rules.mv_elastic_score(200.0) == 1.0           # 上沿含端点
+    assert rules.mv_elastic_score(10.0) == 0.0            # 微盘 <15 → 0
+    assert rules.mv_elastic_score(800.0) == 0.0           # 超大盘 >500 → 0
+    assert 0.0 < rules.mv_elastic_score(300.0) < 1.0      # 上行衰减带
+    assert 0.0 < rules.mv_elastic_score(17.0) < 1.0       # 下行衰减带
+    # 缺失/未知市值 → 中性 0.5(不当微盘惩罚,plan §4.1 🔵)
+    assert rules.mv_elastic_score(0.0) == 0.5
+    assert rules.mv_elastic_score(-5.0) == 0.5
+
+
+def test_day_surge_penalty_monotonic():
+    # 3% < 软闸阈9% → 0(不罚);9.5% 罚项 >0 且单调升;涨停线以上封顶 1.0。
+    assert rules.day_surge_penalty_norm(3.0) == 0.0       # 软闸阈下不罚
+    assert rules.day_surge_penalty_norm(8.99) == 0.0
+    assert rules.day_surge_penalty_norm(9.0) == 0.0       # 阈值起点仍 0(=阈值不罚)
+    assert 0.0 < rules.day_surge_penalty_norm(9.5) <= 1.0
+    assert rules.day_surge_penalty_norm(9.8) == 1.0       # 涨停线封顶
+    assert rules.day_surge_penalty_norm(12.0) == 1.0      # 更高恒 1
+    # 单调不减
+    assert rules.day_surge_penalty_norm(9.2) < rules.day_surge_penalty_norm(9.6)
+
+
+def test_day_surge_warn_text():
+    assert rules.day_surge_warn_text(3.0) is None         # 温和无 warn
+    assert rules.day_surge_warn_text(8.9) is None
+    assert rules.day_surge_warn_text(9.0) is not None     # 阈值起点触发
+    assert "单日强弩之末" in rules.day_surge_warn_text(9.5)
+    assert rules.day_surge_warn_text(None) is None
 
 
 # —— fetch:_enrich_form 内存算放量/新高/60日涨幅/均线 ————————————————
@@ -144,6 +230,37 @@ def test_enrich_no_data_safe():
     sr = StockRow(code="600000", name="x", industry="")
     _enrich_form(sr, "600000", [], {}, "20260506")
     assert sr.vol_multiple == 0.0 and sr.new_high_20d is False and sr.pct_60d is None
+
+
+def test_enrich_old_daily_without_amount_key_no_crash():
+    """旧 daily record 无 amount 键(_daily_seq)→ _enrich_form 退化 vwap_ok False,不崩(向后兼容)。"""
+    closes = [20.0] + [10.0] * 20
+    vols = [3000.0] + [1000.0] * 20
+    dates, dbd = _daily_seq(closes, vols)   # 无 amount 键
+    sr = StockRow(code="600000", name="x", industry="")
+    _enrich_form(sr, "600000", dates, dbd, dates[0])   # 5 参旧签名,无 adj/amount
+    assert sr.vwap_ok is False              # 缺 amount → 保守 False
+    assert sr.vol_multiple == 3.0           # 其余字段照常
+
+
+def test_enrich_writes_vwap_ok_and_had_limit_up():
+    """daily record 带 amount + 历史涨停 → _enrich_form 写回 vwap_ok/had_limit_up(信号1/5)。"""
+    # 今日 close=105,amount=1000 千元,vol=100 手 → vwap=100 → close>vwap → vwap_ok True
+    # 昨日相对前日涨停 ~9.9%(pct[1])→ had_limit_up True
+    n = 12
+    closes = [105.0, 109.9, 100.0] + [100.0] * (n - 3)
+    vols = [100.0] * n
+    amounts = [1000.0] * n
+    dates = [f"2026{'%04d' % (600 + i)}"[:8] for i in range(n)]  # 占位新→旧
+    daily_by_date = {}
+    for i, d in enumerate(dates):
+        daily_by_date[d] = {"600000": {
+            "close": closes[i], "vol": vols[i], "pre_close": closes[i], "amount": amounts[i],
+        }}
+    sr = StockRow(code="600000", name="x", industry="")
+    _enrich_form(sr, "600000", dates, daily_by_date, dates[0])
+    assert sr.vwap_ok is True
+    assert sr.had_limit_up is True
 
 
 # —— fetch_market_snapshot:东财 moneyflow_dc 字段映射/单位/近3日合计/降级 ——————
@@ -382,13 +499,97 @@ def test_pipeline_candidate_shape():
     snap = MarketSnapshot(trade_date="2026-05-06", rows=rows)
     out = pipeline.build_candidates(snap)
     c = out[0]
-    # 逐字段对齐 Candidate(Models.swift)
+    # 逐字段对齐 Candidate(Models.swift)+ 阶段3.1 新增 score
     for k in ("rank", "name", "code", "sector", "tag", "price", "chg",
-              "volMultiple", "volPct", "turnover", "flow"):
+              "volMultiple", "volPct", "turnover", "flow", "score"):
         assert k in c
     assert c["volMultiple"] == "2.8x"
     assert isinstance(c["volPct"], int) and 0 <= c["volPct"] <= 100
     assert c["flow"] == "+1.20亿"   # 12000 万 → 1.20 亿
+    assert c["score"] == 100        # 单票 → 中性满分 100
+
+
+# —— 阶段3.1 pipeline:新因子改排序 + warn 合并 + score 打分展示 ——————————————
+
+def test_pipeline_new_factor_shifts_ranking():
+    """两票放量相同,A 站 VWAP+近期涨停,B 否 → A 排在前(信号1/5 生效,plan Phase C 验收1)。"""
+    a = _sr("600000", "站VWAP有涨停A", "银行", vol_mult=3.0)
+    a.vwap_ok = True
+    a.had_limit_up = True
+    b = _sr("600001", "普通B", "银行", vol_mult=3.0)
+    b.vwap_ok = False
+    b.had_limit_up = False
+    snap = MarketSnapshot(trade_date="2026-05-06", rows=[b, a])   # 故意 B 在前
+    out = pipeline.build_candidates(snap)
+    assert [c["code"] for c in out] == ["600000", "600001"]   # A 靠新因子排到前
+
+
+def test_pipeline_day_surge_warn():
+    """单日暴涨票(今日 pct_chg≥9%)候选 warn 非空且含单日软闸文案(plan Phase C 验收2)。"""
+    rows = [_sr("600000", "单日暴涨", "银行", pct_chg=9.8, pct60=10.0)]  # 今日 9.8%,60日不高
+    snap = MarketSnapshot(trade_date="2026-05-06", rows=rows)
+    out = pipeline.build_candidates(snap)
+    assert out[0].get("warn") and "单日强弩之末" in out[0]["warn"]
+
+
+def test_pipeline_warn_merges_high_and_surge():
+    """今日暴涨 + 60 日高位(50-100%)→ 两条 warn 合并展示(仍单一字符串)。"""
+    rows = [_sr("600000", "双雷", "银行", pct_chg=9.5, pct60=70.0)]
+    snap = MarketSnapshot(trade_date="2026-05-06", rows=rows)
+    out = pipeline.build_candidates(snap)
+    w = out[0].get("warn")
+    assert w and "60日累涨" in w and "单日强弩之末" in w   # 两条合并
+    assert isinstance(w, str)   # 仍单一 Optional[str]
+
+
+def test_pipeline_score_range_and_same_order_as_rank():
+    """score ∈ [SCORE_FLOOR,100] 整数;rank=1 → score=100;末位 = SCORE_FLOOR;不改 rank 次序
+    (plan Phase C 验收4 两票池断言)。"""
+    from app.screen import rules
+    # 三票放量梯度 → 原始分梯度 → 归一后 [100, 中间, SCORE_FLOOR]
+    rows = [
+        _sr("600001", "弱", "银行", vol_mult=1.6),
+        _sr("600002", "强", "银行", vol_mult=5.0),
+        _sr("600003", "中", "银行", vol_mult=3.0),
+    ]
+    snap = MarketSnapshot(trade_date="2026-05-06", rows=rows)
+    out = pipeline.build_candidates(snap)
+    scores = [c["score"] for c in out]
+    ranks = [c["rank"] for c in out]
+    # rank 严格升序(排序不变)
+    assert ranks == [1, 2, 3]
+    # score 整数、值域 [SCORE_FLOOR,100]、与 rank 同序(降序)
+    for s in scores:
+        assert isinstance(s, int) and rules.SCORE_FLOOR <= s <= 100
+    assert scores[0] == 100                    # rank=1 → 100
+    assert scores[-1] == rules.SCORE_FLOOR     # 末位 = SCORE_FLOOR(非 0)
+    assert scores == sorted(scores, reverse=True)   # 与 rank 同序
+
+
+def test_pipeline_two_stock_pool_score_not_100_and_0():
+    """两票池(原始分极小差距)归一后 = [100, SCORE_FLOOR](不再是 100/0,plan §4.0 🟡#4)。"""
+    from app.screen import rules
+    # 两票几乎所有因子相同,仅放量差一点点 → 原始分差极小
+    rows = [
+        _sr("600001", "略强", "银行", vol_mult=2.001),
+        _sr("600002", "略弱", "银行", vol_mult=2.000),
+    ]
+    snap = MarketSnapshot(trade_date="2026-05-06", rows=rows)
+    out = pipeline.build_candidates(snap)
+    scores = sorted([c["score"] for c in out], reverse=True)
+    assert scores == [100, rules.SCORE_FLOOR]   # 不是 [100, 0]
+
+
+def test_pipeline_single_and_all_equal_score_neutral_100():
+    """单票 / 全相等 survivors → score 全为 100(中性满分,退化,plan Phase C 验收4)。"""
+    # 单票
+    single = pipeline.build_candidates(
+        MarketSnapshot(trade_date="2026-05-06", rows=[_sr("600000", "唯一", "银行")]))
+    assert single[0]["score"] == 100
+    # 两票全因子相等
+    rows = [_sr("600001", "A", "银行"), _sr("600002", "B", "银行")]  # 完全相同参数
+    out = pipeline.build_candidates(MarketSnapshot(trade_date="2026-05-06", rows=rows))
+    assert all(c["score"] == 100 for c in out)
 
 
 def test_run_pipeline_degraded_on_failed_snapshot():
@@ -421,17 +622,17 @@ def db(tmp_path):
     return p
 
 
-def _cand(rank, code, warn=None):
+def _cand(rank, code, warn=None, score=100):
     return {
         "rank": rank, "name": f"票{code}", "code": code, "sector": "半导体",
         "tag": "放量突破", "price": 10.0 + rank, "chg": "+3.00%",
         "volMultiple": "2.8x", "volPct": 90, "flow": "+1.20亿",
-        "turnover": "4.6%", "warn": warn,
+        "turnover": "4.6%", "warn": warn, "score": score,
     }
 
 
 def test_upsert_and_list_candidates(db):
-    rows = [_cand(1, "600000"), _cand(2, "600001", warn="60日累涨 70%")]
+    rows = [_cand(1, "600000", score=100), _cand(2, "600001", warn="60日累涨 70%", score=42)]
     n = store.upsert_candidates("2026-05-06", rows, db_path=db)
     assert n == 2
     got = store.list_candidates("2026-05-06", db_path=db)
@@ -439,6 +640,8 @@ def test_upsert_and_list_candidates(db):
     assert got[0]["volMultiple"] == "2.8x" and got[0]["volPct"] == 90
     assert "warn" not in got[0]          # warn=None → 省略键
     assert got[1]["warn"] == "60日累涨 70%"
+    # 阶段3.1:score round-trip 带回读
+    assert got[0]["score"] == 100 and got[1]["score"] == 42
 
 
 def test_upsert_replaces_same_date(db):

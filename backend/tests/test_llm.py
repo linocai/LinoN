@@ -267,10 +267,13 @@ def test_system_prompt_has_schema_and_enums():
 def test_build_user_prompt_candidate_and_coach():
     cand = prompt_mod.build_user_prompt({
         "mode": "candidate", "code": "603986", "name": "兆易创新", "sector": "半导体",
-        "form": {"close": 100.0, "vol_multiple": 2.8}, "fund": {"net_mf_3d": 1200.0},
+        "form": {"close": 100.0, "vol_multiple": 2.8, "vwap_ok": True}, "fund": {"net_mf_3d": 1200.0},
         "news": {"titles": ["放量"]}, "fund_asof": "2026-05-06",
     })
     assert "候选股选股深判" in cand and "兆易创新" in cand and "2026-05-06" in cand
+    # 阶段3.1 信号1/2:candidate 模式含 收盘站VWAP + 量价形态吸筹/出货判读要求
+    assert "收盘站VWAP=" in cand
+    assert "吸筹" in cand and "出货" in cand
 
     coach = prompt_mod.build_user_prompt({
         "mode": "coach", "code": "603986", "name": "兆易创新",
@@ -278,3 +281,66 @@ def test_build_user_prompt_candidate_and_coach():
         "form": {}, "fund": {}, "news": {"note": "无舆情"}, "fund_asof": "2026-05-06",
     })
     assert "二元建议" in coach and "+3.20%" in coach and "还能拿吗" in coach
+    # coach 模式不加吸筹/出货提示(仍二元拿/清,plan Phase C 验收6)
+    assert "量价形态判读要求" not in coach
+
+
+def test_build_user_prompt_degraded_vwap_graceful():
+    """深判降级链:form 缺 vwap_ok(占位 dict 标 —)→ prompt 优雅显示 收盘站VWAP=—,不崩(验收7)。"""
+    cand = prompt_mod.build_user_prompt({
+        "mode": "candidate", "code": "603986", "name": "x",
+        "form": {"close": "—", "vwap_ok": "—", "_degraded": True},
+        "fund": {}, "news": {"note": "无"}, "fund_asof": "2026-05-06",
+    })
+    assert "收盘站VWAP=—" in cand
+
+
+def _ok_daily_with_amount(code, start, end):
+    """带 amount 列的单票 daily(阶段3.1:验 vwap_ok 流入 ctx)。
+
+    今日 close=105,amount=1000 千元,vol=100 手 → vwap=100 → close>vwap → vwap_ok True。
+    """
+    import pandas as pd
+    rows = []
+    for i in range(30):
+        td = f"202605{30 - i:02d}" if (30 - i) <= 31 else "20260501"
+        rows.append({
+            "trade_date": td,
+            "close": 105.0 if i == 0 else 100.0,
+            "vol": 100.0, "pre_close": 100.0, "amount": 1000.0,
+        })
+    return TushareResult.success(pd.DataFrame(rows))
+
+
+def test_analyze_stock_vwap_ok_flows_to_ctx(with_key):
+    """带 amount 的单票 daily → _fetch_form 算出 vwap_ok 并进 ctx(信号1 喂 LLM)。"""
+    captured = {}
+
+    def _fake_deepseek(context):
+        captured["ctx"] = context
+        return deepseek.degraded_analysis("测试")
+
+    analyze.analyze_stock(
+        "603986", "兆易创新", "半导体",
+        daily_fn=_ok_daily_with_amount, moneyflow_fn=_ok_moneyflow,
+        sentiment_fn=lambda c: {"titles": [], "note": "", "degraded": False},
+        deepseek_fn=_fake_deepseek,
+        adj_factor_fn=_ok_adj_factor_flat,
+    )
+    assert captured["ctx"]["form"]["vwap_ok"] is True
+
+
+def test_analyze_stock_degraded_form_has_vwap_placeholder(with_key):
+    """Tushare daily 失败 → 形态占位 dict 带 vwap_ok='—'(降级链不崩,验收7)。"""
+    captured = {}
+
+    def _fake_deepseek(context):
+        captured["ctx"] = context
+        return deepseek.degraded_analysis("数据缺失")
+
+    analyze.analyze_stock(
+        "603986", daily_fn=_fail_fn, moneyflow_fn=_fail_fn,
+        sentiment_fn=lambda c: {"titles": [], "note": "无", "degraded": True},
+        deepseek_fn=_fake_deepseek,
+    )
+    assert captured["ctx"]["form"]["vwap_ok"] == "—"

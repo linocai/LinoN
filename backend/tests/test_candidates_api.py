@@ -37,7 +37,7 @@ def _freeze_today(monkeypatch, iso: str) -> None:
 
 
 def _fake_rows(n):
-    """造 n 条 Candidate dict(rank 1..n)。"""
+    """造 n 条 Candidate dict(rank 1..n;阶段3.1 带 score)。"""
     out = []
     for i in range(1, n + 1):
         out.append({
@@ -45,6 +45,7 @@ def _fake_rows(n):
             "tag": "放量突破", "price": 10.0 + i, "chg": "+3.00%",
             "volMultiple": "2.8x", "volPct": 90, "flow": "+1.20亿",
             "turnover": "4.6%", "warn": None,
+            "score": max(10, 100 - (i - 1) * 5),   # rank1→100 递减,末位不低于 SCORE_FLOOR
         })
     return out
 
@@ -106,11 +107,16 @@ def test_refresh_then_get_truncates_15(client):
     assert g["degraded"] is False and g["trade_date"] == "2026-05-06"
     assert g["free_slots"] == 3
     assert len(g["candidates"]) == 15        # 5×3 截断
-    # 形状对齐 Candidate(camelCase)
+    # 形状对齐 Candidate(camelCase);阶段3.1 键集合 = 阶段2 键集合 + score(精确断言)。
     c0 = g["candidates"][0]
     for k in ("rank", "name", "code", "sector", "tag", "price", "chg",
-              "volMultiple", "volPct", "flow", "turnover"):
+              "volMultiple", "volPct", "flow", "turnover", "score"):
         assert k in c0
+    # 键集合精确:阶段2 的 11 键 + score(warn=None 省略,不在集合内)
+    expected_keys = {"rank", "name", "code", "sector", "tag", "price", "chg",
+                     "volMultiple", "volPct", "flow", "turnover", "score"}
+    assert set(c0.keys()) == expected_keys
+    assert c0["score"] == 100                # rank=1 → score=100(_fake_rows)
 
 
 # —— 截断随 free_slots:开 2 仓 → free=1 → 取 5 ——

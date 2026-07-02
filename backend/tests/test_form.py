@@ -131,3 +131,102 @@ def test_compute_form_ma_window_uses_rules_constant(monkeypatch):
     monkeypatch.setattr(rules, "MA_DAYS", 1, raising=False)
     result2 = compute_form(closes, vols)
     assert result2.above_ma20 is True   # ma_window=[10],today(10)>=10 → True
+
+
+# —— 阶段3.1 信号1:收盘站 VWAP(compute_form 新增 amounts 入参)——————————————
+
+def test_vwap_ok_default_false_without_amounts():
+    """不传 amounts(旧调用点向后兼容)→ vwap_ok 恒 False,不崩。"""
+    closes = [10.0, 9.0, 9.5]
+    vols = [1000.0, 900.0, 950.0]
+    result = compute_form(closes, vols)             # 不传 amounts
+    assert result.vwap_ok is False
+
+
+def test_vwap_ok_close_above_vwap():
+    """收在 VWAP 上 → vwap_ok True。
+
+    今日 amount=1000 千元 = 100 万元, vol=100 手 = 10000 股 → vwap = 1e6/1e4 = 100.0。
+    今日 close=105 >= 100 → 站上 VWAP。
+    """
+    closes = [105.0, 100.0]
+    vols = [100.0, 100.0]           # 手
+    amounts = [1000.0, 1000.0]      # 千元
+    result = compute_form(closes, vols, amounts)
+    assert result.vwap_ok is True
+
+
+def test_vwap_ok_close_below_vwap():
+    """收在 VWAP 下 → vwap_ok False(vwap=100,close=95<100)。"""
+    closes = [95.0, 100.0]
+    vols = [100.0, 100.0]
+    amounts = [1000.0, 1000.0]
+    result = compute_form(closes, vols, amounts)
+    assert result.vwap_ok is False
+
+
+def test_vwap_ok_zero_volume_guard():
+    """停牌/异常行 vols[0]==0 → 除零守卫,vwap_ok False 不报错。"""
+    closes = [95.0, 100.0]
+    vols = [0.0, 100.0]             # 当日停牌 vol=0
+    amounts = [1000.0, 1000.0]
+    result = compute_form(closes, vols, amounts)    # 不抛 ZeroDivisionError
+    assert result.vwap_ok is False
+
+
+# —— 阶段3.1 信号5:近期活跃(had_limit_up,排除今日,从复权 closes 派生)——————————
+
+def test_had_limit_up_historical_day():
+    """近 N 日历史某日(下标 >=1)涨停 ≈9.9% → had_limit_up True。
+
+    构造:closes 新→旧 = [今日, 昨日, 前日, ...];让昨日相对前日涨 ~9.9%
+    (pct[1] = (closes[1]-closes[2])/closes[2])。今日温和(不参与,已排除)。
+    """
+    # closes[2]=100(前日), closes[1]=109.9(昨日,涨9.9%), closes[0]=110(今日温和涨0.09%)
+    closes = [110.0, 109.9, 100.0] + [100.0] * 8
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols)
+    assert result.had_limit_up is True
+
+
+def test_had_limit_up_excludes_today():
+    """仅今日(下标0)暴涨、历史全温和 → had_limit_up False(验排除今日 🟡#1)。
+
+    今日相对昨日涨停(pct[0]≈9.9%),但历史各日温和 → 不算近期活跃(今日交给信号6)。
+    """
+    # closes[0]=109.9(今日暴涨), closes[1]=100(昨日), 之后全 100 温和
+    closes = [109.9, 100.0] + [100.0] * 9
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols)
+    assert result.had_limit_up is False
+
+
+def test_had_limit_up_from_qfq_no_false_positive_on_dividend():
+    """含除权跳变因子的样例:复权后不产生假涨停(验从复权 closes 派生 🟡#2)。
+
+    原始价在除权日会跳变(如 10→5),若用原始 pct 会误判涨停/暴跌;compute_form 收到的
+    是【已复权】closes,除权日跳变已被消除。这里传【复权后】平缓序列 → 无假涨停。
+    """
+    # 复权后序列平缓(每日 ~1% 内波动),即使原始价除权跳变,复权后不产生涨停
+    closes = [100.0, 100.5, 100.2, 99.8, 100.1, 99.9, 100.3, 99.7, 100.0, 100.4, 100.1, 99.6]
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols)
+    assert result.had_limit_up is False
+
+
+def test_had_limit_up_data_insufficient_false():
+    """数据不足(仅 1-2 天,无法派生历史 pct)→ had_limit_up False,不崩。"""
+    assert compute_form([10.0], [1000.0]).had_limit_up is False
+    assert compute_form([10.0, 9.0], [1000.0, 900.0]).had_limit_up is False
+
+
+def test_had_limit_up_respects_lookback_window(monkeypatch):
+    """涨停发生在回看窗口外(第 N+1 日更早)→ 不算(验窗口边界引用 ACTIVE_LOOKBACK_DAYS)。"""
+    from app.screen import rules
+    monkeypatch.setattr(rules, "ACTIVE_LOOKBACK_DAYS", 3, raising=False)
+    # 涨停在 pct[5](窗口 [1:4] 之外)→ False
+    # closes: idx 0..6;pct[5]=(closes[5]-closes[6])/closes[6]
+    closes = [100.0, 100.0, 100.0, 100.0, 100.0, 110.0, 100.0]   # 昨日窗口内全温和
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols)
+    assert result.had_limit_up is False   # 涨停在窗口外(index5 > 窗口上界3)

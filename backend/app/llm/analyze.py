@@ -64,11 +64,13 @@ def _fetch_form(
     if not res.ok or res.data is None or len(res.data) == 0:
         return {"close": "—", "pct_chg": "—", "vol_multiple": "—",
                 "new_high_20d": "—", "above_ma20": "—", "pct_60d": "—",
-                "turnover": "—", "_degraded": True}
+                "turnover": "—", "vwap_ok": "—", "_degraded": True}
     df = res.data.sort_values("trade_date", ascending=False).reset_index(drop=True)
     raw_closes = [float(x) for x in df["close"].tolist()]
     vols = [float(x) for x in df["vol"].tolist()]
     trade_dates = [str(x) for x in df["trade_date"].tolist()]
+    # amount(千元,阶段3.1 VWAP 信号1);单票 daily 有 amount 列,缺列/缺值退化 0.0(vwap_ok False)。
+    amounts = [float(x or 0.0) for x in df["amount"].tolist()] if "amount" in df.columns else None
 
     # 复权因子(新→旧,与 raw_closes 同序对齐);拉取失败 → 全 None,qfq_closes 内部退化不复权。
     adj_map: Dict[str, float] = {}
@@ -85,7 +87,7 @@ def _fetch_form(
 
     closes = qfq_closes(raw_closes, adj_factors)
     today_close = closes[0] if closes else 0.0
-    form = compute_form(closes, vols)
+    form = compute_form(closes, vols, amounts)   # 阶段3.1:传 amount 序列算 vwap_ok(信号1)
 
     return {
         "close": round(today_close, 2), "pct_chg": form.pct_chg,
@@ -93,6 +95,7 @@ def _fetch_form(
         "new_high_20d": form.new_high_20d, "above_ma20": form.above_ma20,
         "pct_60d": form.pct_60d if form.pct_60d is not None else "—",
         "turnover": "—",  # 单票换手需 daily_basic;深判形态以 daily 为主,换手非关键
+        "vwap_ok": form.vwap_ok,   # 收盘站 VWAP(信号1,喂 LLM 判量价形态)
         "_degraded": False,
     }
 

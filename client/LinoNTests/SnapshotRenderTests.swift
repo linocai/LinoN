@@ -28,16 +28,16 @@ final class SnapshotRenderTests: XCTestCase {
             m.candidates = [
                 Candidate(rank: 1, name: "东方电缆", code: "603606", sector: "海缆", tag: "低位平台突破",
                           price: 48.30, chg: "+4.20%", volMultiple: "2.8x", volPct: 92, flow: "+0.9亿",
-                          turnover: "6.2%", warn: nil, analysis: a),
+                          turnover: "6.2%", warn: nil, score: 100, analysis: a),
                 Candidate(rank: 2, name: "紫光国微", code: "002049", sector: "半导体", tag: "主力连续净流入",
                           price: 76.50, chg: "+3.10%", volMultiple: "2.1x", volPct: 68, flow: "+1.5亿",
-                          turnover: "5.1%", warn: nil, analysis: a),
+                          turnover: "5.1%", warn: nil, score: 78, analysis: a),
                 Candidate(rank: 3, name: "三安光电", code: "600703", sector: "光电", tag: "底部放量启动",
                           price: 15.20, chg: "+2.70%", volMultiple: "1.9x", volPct: 60, flow: "+0.7亿",
-                          turnover: "3.8%", warn: nil, analysis: a),
+                          turnover: "3.8%", warn: nil, score: 45, analysis: a),
                 Candidate(rank: 4, name: "中航光电", code: "002179", sector: "军工", tag: "",
                           price: 41.80, chg: "+1.90%", volMultiple: "1.7x", volPct: 52, flow: "+0.5亿",
-                          turnover: "2.9%", warn: "前期涨幅 +58% · 高位警告降级", analysis: a),
+                          turnover: "2.9%", warn: "前期涨幅 +58% · 高位警告降级", score: 10, analysis: a),
             ]
             m.candidatesTradeDate = "2026-06-23"
         }
@@ -86,6 +86,37 @@ final class SnapshotRenderTests: XCTestCase {
         }
         .padding(16)
         render(list, size: CGSize(width: 390, height: 420), name: "candidate_rows_ios")
+    }
+
+    func testRenderCandidateRowsMac() {
+        // macOS 横向多列布局(compact:false)——核对 score 窄列在位。
+        let m = model(withCandidates: true)
+        let list = VStack(spacing: 0) {
+            ForEach(Array(m.shownCandidates.enumerated()), id: \.element.id) { idx, c in
+                CandidateRow(candidate: c, compact: false)
+                if idx < m.shownCandidates.count - 1 {
+                    Divider().overlay(LN.hairline).padding(.leading, 16)
+                }
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: 14).fill(LN.cardBg))
+        .padding(16)
+        render(list, size: CGSize(width: 900, height: 360), name: "candidate_rows_mac")
+    }
+
+    func testRenderCandidateRowNilScoreNoCollapse() {
+        // score=nil(前向兼容旧后端)→ 徽章不显示、行布局不塌(iOS + macOS 各渲一张)。
+        let g = AnalysisAxis(value: "—", tone: .neutral, text: "")
+        let a = DeepAnalysis(form: g, fund: g, news: g, verdict: .watch, plan: "")
+        let c = Candidate(rank: 1, name: "无分票", code: "600000", sector: "银行", tag: "站上均线",
+                          price: 12.30, chg: "+2.00%", volMultiple: "2.0x", volPct: 60, flow: "+0.4亿",
+                          turnover: "3.5%", warn: nil, score: nil, analysis: a)
+        let iosRow = CandidateRow(candidate: c, compact: true)
+            .background(LN.cardBg).padding(16)
+        render(iosRow, size: CGSize(width: 390, height: 120), name: "candidate_row_nilscore_ios")
+        let macRow = CandidateRow(candidate: c, compact: false)
+            .background(LN.cardBg).padding(16)
+        render(macRow, size: CGSize(width: 900, height: 120), name: "candidate_row_nilscore_mac")
     }
 
     func testRenderCandidatesClosed() {

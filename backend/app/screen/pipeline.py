@@ -99,18 +99,28 @@ def build_candidates(snapshot: MarketSnapshot) -> List[Dict[str, Any]]:
     if not survivors:
         return []
 
-    # 机械排序(放量权重最大)
+    # 机械排序(阶段3.1 八因子:放量权重最大 + VWAP/市值弹性/近期活跃/换手健康 + 单日软闸罚项)
     scores = rules.rank_score(
         vol_multiples=[s.vol_multiple for s in survivors],
         fund_3d=[s.net_mf_rate_3d for s in survivors],  # 相对口径(占成交额%),免大盘股偏置
         turnovers=[s.turnover for s in survivors],
         pct_60ds=[(s.pct_60d if s.pct_60d is not None else 0.0) for s in survivors],
+        vwap_oks=[s.vwap_ok for s in survivors],                 # 信号1
+        total_mv_yis=[s.total_mv_yi for s in survivors],         # 信号4
+        actives=[s.had_limit_up for s in survivors],             # 信号5
+        day_pcts=[s.pct_chg for s in survivors],                 # 信号6(今日涨幅)
     )
-    ranked = sorted(zip(survivors, scores), key=lambda t: t[1], reverse=True)
+    # 展示分 score:对【全部 survivors】原始加权分 min-max 归一到 [SCORE_FLOOR,100](截断前,
+    # 与 rank 同源同序、只展示不改排序;全相等/单票 → 中性满分 100;见 plan §4.0 打分展示口径)。
+    display_scores = _normalize_scores(scores)
+
+    ranked = sorted(
+        zip(survivors, scores, display_scores), key=lambda t: t[1], reverse=True
+    )
 
     out: List[Dict[str, Any]] = []
-    for i, (sr, _score) in enumerate(ranked, start=1):
-        warn = rules.high_warn_text(sr.pct_60d)   # ≥50% 且 <100% → 非空
+    for i, (sr, _raw, disp) in enumerate(ranked, start=1):
+        warn = _merge_warn(sr)
         out.append({
             "rank": i,
             "name": sr.name,
@@ -124,8 +134,40 @@ def build_candidates(snapshot: MarketSnapshot) -> List[Dict[str, Any]]:
             "flow": _fmt_flow(sr.net_mf_3d),
             "turnover": _fmt_turnover(sr.turnover),
             "warn": warn,   # None → 客户端不降级
+            "score": disp,  # 阶段3.1:当日相对分(展示,不参与排序/截断)
         })
     return out
+
+
+def _merge_warn(sr: StockRow) -> Optional[str]:
+    """合并 60 日高位 warn(信号无关,现有) + 单日暴涨软闸 warn(信号6);仍单一可选字符串。
+
+    两条都命中 → 拼接展示("；"分隔);只命中一条 → 该条;都不命中 → None。
+    plan §4.1:warn 仍是 Optional[str],客户端 CandidateRow 已有琥珀降级逻辑,不改契约。
+    """
+    high = rules.high_warn_text(sr.pct_60d)          # ≥50% 且 <100% → 非空
+    surge = rules.day_surge_warn_text(sr.pct_chg)    # 今日 ≥9% → 非空
+    parts = [w for w in (high, surge) if w]
+    if not parts:
+        return None
+    return "；".join(parts)
+
+
+def _normalize_scores(raw_scores: List[float]) -> List[int]:
+    """把原始加权分 min-max 归一到 [SCORE_FLOOR, 100] 取整(展示分,plan §4.0)。
+
+    · 对传入的【全部原始分】(截断前)归一——与 rank 同源同序,单调递增变换,不改次序。
+    · 全相等/单票(max-min≈0)→ 统一给中性满分 100(避免除零 + "唯一/并列最优")。
+    · floor 抬到 SCORE_FLOOR(=10)而非 0:避免末位恒 0 分、两票必然 100/0 的观感矛盾。
+    """
+    if not raw_scores:
+        return []
+    lo, hi = min(raw_scores), max(raw_scores)
+    floor = rules.SCORE_FLOOR
+    if hi - lo < 1e-12:
+        return [100] * len(raw_scores)   # 全相等/单票 → 中性满分
+    span = hi - lo
+    return [int(round(floor + (s - lo) / span * (100 - floor))) for s in raw_scores]
 
 
 def run_pipeline(
