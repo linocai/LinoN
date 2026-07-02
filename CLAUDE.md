@@ -96,12 +96,12 @@
 - **后端唯一改动**:`GET /positions` 按需拉一拍实时价填 `price`(§4b 联调点,后端供 price 客户端算 pnl);拉价失败不阻塞(price=0,客户端按 buy_price 兜底,pnl=0)。`flow3d` 仍占位(需 Tushare,阶段2)。可注入 `app.api.app._quotes_fn` 免单测联网。
 - **待 track C/真机**:真 APNs 投递、真 device token 注册(模拟器拿不到真 token)、锁屏通知卡 + 动作按钮、macOS 系统通知。`PushManager` 的注册/category/ack 行为已实现,真机才能端到端验。
 
-## 待联调(token/SSH/真机就绪后)
+## 待联调(盘中实时价)
 
-- Tushare 有 token 真拉一条 daily/moneyflow(本期只验证无 token 降级)。
-- 实时价真源**联网+盘中**复测(本期用收盘快照 + 样例报文单测;盘后源仍返回上一交易日快照)。
-- `sync.sh` 填 host/user/path 后真 rsync 到 ECS,远端 `setup.sh` 跑通。
-- `deploy/linon.service` 阶段1 接 FastAPI 后才 enable/start(本期注释态)。
+> token/SSH/ECS 部署/systemd 服务/真机 APNs 均已就绪(详见 PROJECT_PLAN §3),原"待联调"里
+> Tushare 真拉、`sync.sh` rsync 到 ECS、`linon.service` enable/start 三条均已完成、已删。仅剩:
+
+- 实时价真源**联网+盘中**复测:监控硬线用的新浪/腾讯实时源本期只验过收盘快照 + 样例报文单测,**未在交易时段真盘中复测**(盘后源返回上一交易日快照)。
 
 ## 阶段2 track E:候选 + 深析客户端(已落地)
 
