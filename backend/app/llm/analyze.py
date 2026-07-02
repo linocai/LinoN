@@ -248,8 +248,9 @@ def _fetch_chat_facts(
         news = {"titles": [], "note": "未获取到舆情,仅技术+资金判定", "degraded": True}
 
     facts = {"form": form, "fund": fund, "fund_asof": fund_asof, "news": news}
-    # 形态/资金均降级(无数据)时不缓存,留给下一轮追问重试;否则缓存供同日追问复用。
-    if not form.get("_degraded") or not fund.get("_degraded"):
+    # 形态/资金**任一降级**(无数据)即不缓存,留给下一轮追问重试——避免资金瞬时失败把降级
+    # 资金面钉一整天(当日重开 thread 落的 verdict 都基于缺失资金)。两者都成功才缓存供同日复用。
+    if not form.get("_degraded") and not fund.get("_degraded"):
         _chat_fact_cache[key] = facts
     return facts
 

@@ -204,9 +204,21 @@ def build_chat_context_block(context: Dict[str, Any]) -> str:
     lines = []
     mode = context.get("mode", "candidate")
     if mode == "coach":
-        lines.append("【模式】在持仓中间地带对话(用户已持有该票,当前处于 -5%~+15% 中间地带)。")
-        if context.get("pnl_pct") is not None:
-            lines.append(f"【当前盈亏】{context['pnl_pct']:+.2f}%(在 -5%~+15% 中间地带)")
+        # 持仓追问一律走 coach(含触损/触盈),按实际盈亏派生区间措辞,**不写死"中间地带"**——
+        # 否则对 -7% 触损持仓会注入"在 -5%~+15% 中间地带"这种自相矛盾的假事实(违反"只注入真
+        # 事实")。阈 -5%/+15% 此处为文案引用(判定在 hardline/store,不另立常量)。
+        _pnl = context.get("pnl_pct")
+        if _pnl is None:
+            _zone = "在持仓"
+        elif _pnl < -5.0:
+            _zone = "已跌破 -5% 止损线"
+        elif _pnl > 15.0:
+            _zone = "已过 +15% 止盈线"
+        else:
+            _zone = "-5%~+15% 中间地带"
+        lines.append(f"【模式】在持仓对话(用户已持有该票,{_zone})。")
+        if _pnl is not None:
+            lines.append(f"【当前盈亏】{_pnl:+.2f}%({_zone})")
         if context.get("trade_day") is not None:
             lines.append(f"【持仓交易日】第 {context['trade_day']} 个交易日(D{context['trade_day']};D4 无条件清仓)")
     else:
