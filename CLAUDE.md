@@ -13,7 +13,7 @@
 
 - 止损线 = `buy_price×0.95`,**纯派生不落库**(`positions` 无 stop_line 列);止盈 ×1.15;D4 强平。
 - 触发线口径**定死 -5.0**;展示侧 -4.9 仅显示阈(见 `Models.swift` 的 `hitStop`)。
-- `kept_stop` 容差带 **[-6%, -4%]**(滑点不误判破纪律),常量在 `app/db/store.py` 顶部。
+- `kept_stop` 容差带 **[-6%, -4%]**(滑点不误判破纪律),常量在 `app/db/store/constants.py`(经 store 包 re-export)。
 - 持仓交易日计数:**买入日=D1**,`count==4 ⟺ should_force_close`(D4 强平,可卖 D2/D3)。改这个语义=改契约,必须回 planner。
 - 绿涨红跌(用户明确选择,与 A 股本地相反),**勿"纠正"**。
 
@@ -21,7 +21,8 @@
 
 - **单 unit 架构**:监控是 app 内后台 asyncio 任务(`app/monitor/loop.py:monitor_loop`),由 `app/api/app.py` 的 `lifespan` 起停,**不另起进程**。测试时设 `app.api.app.ENABLE_MONITOR=False` 关后台轮询,免干扰。
 - **代码分层**:`app/api`(app/deps/schemas)、`app/monitor`(hardline 纯判定 / escalation 升级状态机 / eod 摘要 / loop 轮询)、`app/push`(apns)。**硬线判定、EOD、升级全是纯函数/可注入**,单测不联网不真推。
-- **规则常量唯一源**:`-5.0/+15.0/D4/容差带` 只在 `app/db/store.py` 顶部;`hardline.py`/`eod.py` 从 store import,**禁止再写一份**。
+- **`app/db/store` 是包不是单文件(2026-07-02 拆包)**:原 909 行 `store.py` god-module 按实体拆为 `app/db/store/{constants,_common,schema,positions,trades,review,device_tokens,candidates,outcomes}.py`,**`__init__.py` 原样 re-export 全部公开 API + 外部用到的私有名(`_compute_kept_flags`/`_ensure_*`/`_CANDIDATE_KEYS`/`_SCHEMA`/`_now`/`_db_path`)**——所有调用点(`from app.db.store import X` / `store.X` / `store_mod.X`)逐字节零改动,309 测试无回归。**坑**:`close_position` 沉淀 memory 经 **facade 取 `insert_memory`**(`from app.db import store as _store; _store.insert_memory(...)`)而非顶部直接 import 绑定——否则 `monkeypatch(app.db.store.insert_memory)` 拦不到、原子回滚测试失效。改 store 内跨模块调"被 monkeypatch 拦截的函数"时切记走 facade。
+- **规则常量唯一源**:`-5.0/+15.0/D4/容差带` 只在 `app/db/store/constants.py`(经 store 包 `__init__` re-export,import 口径不变 `from app.db.store import …`);`hardline.py`/`eod.py` 从 store import,**禁止再写一份**。
 - **鉴权**:`require_token` 比对 `.env` `API_TOKEN`(Bearer,`hmac.compare_digest`);startup `require_api_token_ready()` fail-fast `len≥16`。本地测试 token 已写 `backend/.env`(64 字符,gitignored)。
 - **buy_date 派生**:`open` 的 buy_date = 当前交易日(今天非交易日→`prev_trading_day`);周末/节假日录入会落到上一交易日(预期行为,非 bug)。
 - **APNs JWT**:token-based(ES256),`build_jwt(key_pem,...)` 收 PEM 串,**单测用临时 EC P-256 key**(`cryptography.ec.generate_private_key(SECP256R1())`),不依赖真 `.p8`。`send_push(transport=...)` 注入假 transport 即不真连 Apple。`has_apns_config` 仅查四要素齐不齐;`.p8` 路径不存在时 `get_jwt()` 优雅返回 None。
@@ -34,7 +35,7 @@
 ## 阶段2:选股 + 决策(后端 D1–D5 已落地)
 
 - **新包**:`app/screen/{rules,fetch,pipeline}.py`(选股数据层)+ `app/llm/{prompt,deepseek,sentiment,analyze}.py`(DeepSeek 深判层)。新增 4 端点:`GET /candidates`、`POST /candidates/refresh`、`POST /candidates/{code}/analyze`、`POST /positions/{id}/coach`。新增 `candidates` 缓存表(DDL §4.2,`UNIQUE(trade_date,code)`)。
-- **规则单一源不漂移**:选股硬规则(黑名单按**板块前缀**:创业板 `30*`/科创 `688*`+`689*`/北交所 `8*`+`4*`+`920*`、ST、白酒行业;高位线 ≥100% 排除·≥50% warn、截断 `5×free_slots`、排序权重 `vol0.4/fund0.25/turnover0.2/low0.15`)全在 `app/screen/rules.py` 顶部;`-5.0/+15/D4/容差带` 仍只在 `store.py`(选股层不碰)。**代码段黑名单坑(2026-06-28 三次同类漏后统一修)**:枚举精确段易随交易所新增子段漏挡,**已统一收为板块整段正则 `^(30|688|689|8|4|920)`**——创业板旧 `300` 漏 301/302(信濠光电 301051)、科创旧 `688` 漏 689 CDR(九号 689009)、旧无 `920` 漏北交所新段(莱赛激光 920363)。**教训:黑名单按板块整段、勿枚举精确子段**。**铁律:技术面交 LLM 判**——`rules.py` 的宽筛阈(`VOL_MULTIPLE_MIN=1.5`/`NEW_HIGH_DAYS=20`/`MA_DAYS=20`/近3日净流入>0)都标注"宁松勿紧、复盘迭代、不卡生死",不当死阈值。
+- **规则单一源不漂移**:选股硬规则(黑名单按**板块前缀**:创业板 `30*`/科创 `688*`+`689*`/北交所 `8*`+`4*`+`920*`、ST、白酒行业;高位线 ≥100% 排除·≥50% warn、截断 `5×free_slots`、排序权重 `vol0.4/fund0.25/turnover0.2/low0.15`)全在 `app/screen/rules.py` 顶部;`-5.0/+15/D4/容差带` 仍只在 `app/db/store/constants.py`(选股层不碰)。**代码段黑名单坑(2026-06-28 三次同类漏后统一修)**:枚举精确段易随交易所新增子段漏挡,**已统一收为板块整段正则 `^(30|688|689|8|4|920)`**——创业板旧 `300` 漏 301/302(信濠光电 301051)、科创旧 `688` 漏 689 CDR(九号 689009)、旧无 `920` 漏北交所新段(莱赛激光 920363)。**教训:黑名单按板块整段、勿枚举精确子段**。**铁律:技术面交 LLM 判**——`rules.py` 的宽筛阈(`VOL_MULTIPLE_MIN=1.5`/`NEW_HIGH_DAYS=20`/`MA_DAYS=20`/近3日净流入>0)都标注"宁松勿紧、复盘迭代、不卡生死",不当死阈值。
 - **Tushare 真实字段口径(2026-06 冒烟校验,务必照此解析)**:全市场批量接口不带 `ts_code`、只带 `trade_date` → 一次返回全市场。`daily_basic`:`close`/`turnover_rate`(%)/`total_mv`(**万元**,÷1e4→亿)/`volume_ratio`(量比,本期未用)。`moneyflow_dc`(**选股资金面唯一信号,东财源,见下条**):`net_amount`(**万元**,主力净额)。`daily`:`vol`(手)/`amount`(**千元**)/`close`/`pre_close`/`pct_chg`(%)。放量倍数=当日 vol/前5日均 vol(自己算,非 volume_ratio)。`moneyflow`(原始源,保留供 LLM 深判层 `analyze.py`):`net_mf_amount`(**万元**,同花顺式主力口径)。
 - **资金源已切东财 `moneyflow_dc`(2026-06-28,6000 积分解锁)**:选股数据层(`screen/fetch.py` 经 `tushare_client.ts_moneyflow_dc_all`)读 `net_amount`(**万元**)替代原始 `moneyflow.net_mf_amount`(**同单位万元**,展示侧 `_fmt_flow` ÷1e4→亿 不变)。**`net_amount` = `buy_elg_amount`(超大单)+ `buy_lg_amount`(大单)**——东财"主力"口径(实测 6/26 茅台 `-62432.45`万 = `-28934.93` + `-33497.52`,逐分对齐)。东财源全市场**给到上一交易日**(今天 6/28 → 数据 6/26,5887 行),比原始 `moneyflow` 偶发"几天到约一周"发布延迟更优。与原始 `moneyflow` **数值有口径差(东财主力 vs 同花顺式)属预期非 bug**——这正是用户在东财/同花顺 App 里看到的那套主力净额,更标准。字段全集:`trade_date/ts_code/name/pct_change/close/net_amount/net_amount_rate/buy_{elg,lg,md,sm}_amount(及各 _rate)`。**降级守恒**:无 token / 2000 积分无 `moneyflow_dc` 权限(Tushare 抛权限异常)/ 拉取失败 → 资金面退化为 0(`fetch` 不崩;但粗筛"近3日净流入>0"会把全市场挡掉 → degraded 空列表,符合契约)。
 - **白酒黑名单口径(Review 拍板)**:用 `stock_basic.industry` 精确归类,**非名称关键词**。实测 Tushare 酒类 industry 值:`白酒`(19 只,茅台 600519/五粮液 000858 均在)、`啤酒`、`红黄酒`(注意是"红黄酒"非"黄酒",我的关键词 `黄酒` 子串命中它)。**`酒店餐饮` 不是酒企,不能排除**——我的关键词列表(`白酒/酿酒/黄酒/啤酒/葡萄酒/其他酒`)都不是 `酒店餐饮` 的子串,正确放行。行业映射 `fetch.load_industry_map()` 进程内缓存(启动/EOD 拉一次),无 token → 空映射,白酒黑名单退化为仅代码段/ST(不崩)。
