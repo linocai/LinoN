@@ -50,8 +50,8 @@
 - **阶段 2.5(选股数据质量 + 信号回测闭环)已完工收口**——纯后端小版本:① 给选股/深判技术指标(放量倍数/新高/均线/60日涨幅)补前复权(新建 `app/screen/form.py` 的 `qfq_closes`+`compute_form`,消除 `fetch.py`/`analyze.py` 两处重复计算);② 给候选/DeepSeek 深判加事后回测闭环(候选事后3交易日实际收益回填 + 排序分位/tag/verdict 三维度统计,新建 `app/screen/backtest.py`、新表 `candidate_outcomes`/`analysis_verdicts`、新只读端点 `GET /candidates/outcomes`)。reviewer 审查**零致命零重要**(6 建议全 🔵,不阻断,3 条已收口处理 + 3 条入 §5 Backlog)。全文 `archive/stage2.5_选股数据质量_plan.md` + `archive/REVIEW_REPORT_阶段2.5.md`。
 - **阶段 3(复盘闭环)已完工收口**——四件事:① 周复盘打分(确定性聚合 `trades` 表既有 `kept_*`/`broke_rule` 字段,`discipline_rate=score` 一比一,零 LLM);② 复盘/记忆端点(`GET /review`、`POST /review/{week}/note`、`GET /memory`);③ **`trades` 表加 `name`/`note` 两列(项目首次真 schema migration,已按高危区姿势——PRAGMA 探测 + try/except 不拖垮 startup + 连跑幂等验证——安全落地)**;④ 教练大脑(中性 `history_digest` 统计注入 DeepSeek prompt / 带情绪 `review_ref` 只回客户端展示,两路径严格隔离 + `SYSTEM_PROMPT` guardrail 防串味)。前端新增 ReviewView/MemoryView 双端 + AnalysisView coach 卡换真实历史引用。reviewer 审查**零致命**、1 个重要问题(`GET /review`/`POST /review/{week}/note` 非法 week 格式抛未捕获 `ValueError`→500)**已由主会话直接修复**(两端点加 try/except 捕获 `ValueError`/`TypeError` 返回 422,已验证真实 HTTP 请求 422 + pytest 276 全绿无回归),4 条建议入 §5 Backlog。全文 `archive/stage3_复盘闭环_plan.md` + `archive/REVIEW_REPORT_阶段3.md`。
 - **阶段 3.1(选股信号增强)已完工收口**——把杨永兴"一夜持股法"6 类选股信号(收盘站 VWAP / 量价形态交 LLM 深判 / 换手健康区间 / 市值弹性 / 近期活跃有涨停 / 单日强弩之末软闸)以纯软信号方式(排序权重从 4 键扩为 8 键 + LLM 深判输入 + warn 软闸)融入现有粗筛/排序/深判,零新增硬排除、零新增 Tushare 接口调用;并把排序内部加权综合分暴露为候选卡「当日相对分」`score`(候选池内 min-max 归一 `[10,100]`,不跨天可比)。`candidates` 表加 `score` 列(项目第二次真 schema migration,复用阶段3 `_ensure_*_columns` 迁移姿势)。plan-critic 两轮审查抓住并堵住 5 个风险点(候选缓存迁移链路断层/信号5-6 互斥打架/涨停判定数据源口径/客户端前向兼容/打分归一边界),施工用 builder-pro(Opus,触及高危 schema migration)。reviewer 审查**零致命零代码级重要**(1 条流程性重要——Plan 状态滞后+未 commit,本次收口已处理;5 条建议入下方说明/Backlog,不阻断)。全文 `archive/stage3.1_选股信号增强_plan.md` + `archive/REVIEW_REPORT_阶段3.1.md`。
-- **v1.2.1(深析对话化 + 追问接 DeepSeek)施工中,Phase A+B+C 已完工,剩 Phase D(全量部署)**:三件事——① 候选行只有「深析」按钮进(双端,Phase B ✅);② 初始深析从结构化三轴卡改对话式自由文本(Phase C ✅);③ 追问框真接 DeepSeek 多轮问答(Phase C ✅)。**核心架构决定**:新增统一对话端点 `POST /chat`(不合并进 `/analyze`/`/coach`,二者保留);对话 = prose reply + 旁路抽 verdict 落库保回测链路(仅首条候选对话且非降级才落,决定2);后端无状态、多轮上下文客户端全量回传(`chatTurns(from:)` 收敛 user/assistant 两值、截断保留最近 8 轮且保留最近一条 assistant);守味隔离沿阶段3(只注入 history_digest,绝不注入 review_ref);对话专属超时 25s×2(不复用 `/analyze` 的 12s×3)。Phase B:候选行整行不可点、macOS/iOS 均改真「深析」Button 唯一入口,双端 build + 快照核对通过。Phase C:`APIClient.chat()` + `AppModel.runChat/sendComposer` 改接 `/chat`,`firstVerdict`/`firstAssistantMsgId` 只在 `isFirst` 时写(追问翻脸按钮不回溯消失),买入按钮组搬进对话气泡下方,`.analysis` 消息分支删(死代码,`DeepAnalysisCard` 本体保留供快照测试),资金时序标注移到对话区顶部常驻;coach 触损/中间地带路径不变仍走 `/coach`。后端 pytest 337 全绿(Phase A 新增 28);客户端 XCTest 49 全绿(Phase C 新增 5:`chatTurns` 序列化/截断 4 条 + `sendComposer` 新分支 1 条);双端 `BUILD SUCCEEDED`。**剩 Phase D 全量部署未做**(含 store 拆包重构 + v1.2.1 新增两步走)。Plan 全文见 §4。
-- **门禁数字**:**已发布 2 阶段**(阶段1+阶段2,live `https://ln.linotsai.top`,阶段2 于 2026-06-28 上线;阶段2.5/阶段3/阶段3.1 为纯后端/全栈小版本,代码完工待用户部署;v1.2.1 施工中);**阶段4(K线/舆情/双端真机 E2E)待规划**。后端 pytest **309 全绿**(阶段1 基线 105 + 阶段2 新增 88 → 193 + 阶段2.5 新增 34 → 227 + 阶段3 新增 49 → 276 + 阶段3.1 新增 33);客户端 XCTest **44 全绿**(17 + 阶段2 新增 15 → 32,阶段2.5 无前端改动,阶段3 新增 8 → 40,阶段3.1 新增 4);**双端 build iOS Simulator + macOS 各 `BUILD SUCCEEDED`**;真 key 活体冒烟过(Tushare 5490 行/茅台白酒归类符合假设;DeepSeek `json_object` 真输出夹紧成合法 DeepAnalysis;analyze/coach 真 key curl 闭环;离屏快照逐屏目检候选行/满仓🔒/深析卡 fund_asof/教练红橙卡;阶段2.5 真 token 限频冒烟 65/65 天 adj_factor 全部成功,零限频失败,耗时 39s→45.5-45.7s)。阶段2 新增端点 **4 个**:`GET /candidates`、`POST /candidates/refresh`、`POST /candidates/{code}/analyze`、`POST /positions/{id}/coach`;阶段2.5 新增只读端点 **1 个**:`GET /candidates/outcomes`;阶段3 新增端点 **3 个**(`GET /review`、`POST /review/{week}/note`、`GET /memory`)+ `/coach` 新增可选字段 `review_ref`;阶段3.1 无新增端点,`GET /candidates` 候选 dict 新增可选展示字段 `score`(int,前向兼容)。
+- **v1.2.1(深析对话化 + 追问接 DeepSeek)已完工收口并上线**:三件事——① 候选行只有「深析」按钮进(双端);② 初始深析从结构化三轴卡改对话式自由文本;③ 追问框真接 DeepSeek 多轮问答。新增统一对话端点 `POST /chat`(不合并进 `/analyze`/`/coach`,二者保留供回测链路/教练红橙卡);对话 prose reply + 旁路抽 verdict 落库(仅首条候选对话且非降级才落);后端无状态、多轮上下文客户端全量回传;守味隔离沿阶段3(只注入 history_digest);对话专属超时 25s×2。reviewer 审查**零致命**,2 个重要问题(coach 区间措辞按 pnl 派生 / 事实缓存条件改 and)已修复。**两步全量部署已上线 ECS**(先收 store 拆包重构欠账、再上 v1.2.1 新增),端到端验通:`/chat` 生产返 181 字自由对话、fund_asof 07-02、东财资金流入正常。7 条 🔵 建议 + 1 条遗留入 §5 Backlog。全文 `archive/v1.2.1_plan.md` + `archive/REVIEW_REPORT_v1.2.1.md`。
+- **门禁数字**:**已发布 3 阶段**(阶段1+阶段2+v1.2.1,live `https://ln.linotsai.top`,阶段2 于 2026-06-28 上线、v1.2.1 于 2026-07-02 两步上线;阶段2.5/阶段3/阶段3.1 为纯后端/全栈小版本随部署链路一并上线;`app/db/store.py` 单文件在 ECS 已不存在,store 拆包首次真上生产)。**阶段4(K线/舆情/双端真机 E2E)待规划**。后端 pytest **337 全绿**(阶段1 基线 105 + 阶段2 新增 88 → 193 + 阶段2.5 新增 34 → 227 + 阶段3 新增 49 → 276 + 阶段3.1 新增 33 → 309 + v1.2.1 新增 28);客户端 XCTest **49 全绿**(17 + 阶段2 新增 15 → 32,阶段2.5 无前端改动,阶段3 新增 8 → 40,阶段3.1 新增 4 → 44,v1.2.1 新增 5);**双端 build iOS Simulator + macOS 各 `BUILD SUCCEEDED`**;真 key 活体冒烟过(Tushare 5490 行/茅台白酒归类符合假设;DeepSeek `json_object` 真输出夹紧成合法 DeepAnalysis;analyze/coach/chat 真 key curl 闭环;离屏快照逐屏目检候选行/满仓🔒/深析卡 fund_asof/教练红橙卡;阶段2.5 真 token 限频冒烟 65/65 天 adj_factor 全部成功,零限频失败,耗时 39s→45.5-45.7s)。阶段2 新增端点 **4 个**:`GET /candidates`、`POST /candidates/refresh`、`POST /candidates/{code}/analyze`、`POST /positions/{id}/coach`;阶段2.5 新增只读端点 **1 个**:`GET /candidates/outcomes`;阶段3 新增端点 **3 个**(`GET /review`、`POST /review/{week}/note`、`GET /memory`)+ `/coach` 新增可选字段 `review_ref`;阶段3.1 无新增端点,`GET /candidates` 候选 dict 新增可选展示字段 `score`(int,前向兼容);v1.2.1 新增端点 **1 个**:`POST /chat`。
 - **上线即空仓**:无存量持仓迁移,无 legacy / 既往不咎机制,`positions` 从 0 行起。
 - **止损线机械派生**:`stop_line = buy_price × 0.95`,**纯派生、不落库**(-10% 极强趋势例外已砍,止损恒为 ×0.95;与持仓天数同样按读取时算,单一事实源),系统自动算,**拒绝用户手填**。
 - **ECS 现实**:`deploy@118.178.122.194:/opt/linon`,systemd **单 unit** `linon.service` **active**(端口 **8001**,监控作 app 内后台轮询、不另起进程),nginx `ln.linotsai.top` + certbot 证书;内存紧(1.6G+2G swap),已占端口 8000/8787/5432/80/443/8001;`.env`/`.p8` 均 600 `linon:linon`。
@@ -69,173 +69,9 @@
 | 4 收尾(**待规划**) | — | K 线/分时图、舆情展示、双端真机 E2E 打磨 |
 | V2(推后) | 历史行情重放 / 纪律陪练沙盒(陪练非裁判) | 临场纪律陪练 |
 
-## 4. 当前版本 Plan —— v1.2.1 深析对话化 + 追问接 DeepSeek
+## 4. 当前版本 Plan
 
-> 立项 2026-07-02。三件事:① 候选行只有「深析」按钮进(双端);② 初始深析从结构化三轴卡改为对话式;③ 追问框真接 DeepSeek 自由问答。核心是引入**统一的对话式 DeepSeek 端点**。范围:全栈(后端新增对话端点 + 客户端渲染改造),含一次**全量部署**(顺带带上未部署的 store 拆包重构)。
-
-### 4.0 核心架构决定(已拍死)
-
-**决定 1:新增统一多轮对话端点 `POST /chat`,不合并进 `/analyze`/`/coach`。** 三件事的 2、3 共用它;`/analyze`(结构化三轴卡)与 `/coach`(二元建议)**保留原样不动**——回测链路(`analysis_verdicts`/`candidate_outcomes`)、教练红橙卡都依赖它们的结构化输出,砍不得。对话端点是**并行新增的一条自由文本链路**,与结构化链路共存。
-
-**决定 2:对话 = prose 主体 + 旁路抽 verdict 落库(不断回测链路,降级绝不污染)。** 对话端点让 DeepSeek 返回**两段式 JSON**:`{ reply: "<自由中文分析,concise ~200–250 字>", verdict: "可进|观望|不进" }`。`reply` 是给用户看的自然语言(客户端渲染为 assistant 气泡);`verdict` 是机器可读旁路,**仅初始深析(候选第一条消息)且非降级时**落 `analysis_verdicts`(复用 `_maybe_persist_verdict`),追问轮不落。
-- **落库门槛(堵 plan-critic 致命2:降级污染回测)**:`chat()`/`degraded_chat()` 返回体**必须带 `degraded: bool` 标记**(现 `_maybe_persist_verdict`[app.py:357] 只查 `verdict in _VERDICTS`、降级"观望"照落,现契约不存在"降级不落";`degraded_chat` 现也无标记 → 必须补)。端点落库分支收紧为 `if is_first and mode=="candidate" and not result["degraded"]:` 才落。
-- **为什么必须堵**:对话化后 thread 退出即清、重开即 `is_first=true`,重复首判远比 `/analyze` 频繁;`upsert_analysis_verdict` 是**覆盖式** → 白天真"可进"会被晚上一次抽风降级的"观望"覆盖,回测静默污染。`not degraded` 门槛是硬要求,非可选优化。(`/analyze` 端点 `_maybe_persist_verdict` 同款降级污染隐患记 §5 Backlog,本版本不动其行为。)
-
-**决定 3:多轮上下文由客户端持有、每次全量回传,后端无状态。** `POST /chat` 请求体带 `messages: [{role, content}]`(OpenAI 风格历史) + `context`(标的元信息)。后端**不落库 thread**(SQLite 不加会话表),每次把历史拼进 DeepSeek `messages` 数组。理由:单用户、thread 短暂(退出深析即清)、无状态最简、与现有降级链路一致。历史长度客户端截断(见 C3 上限),防 token 爆。
-
-**决定 4:资金/形态事实由后端注入 system/context,不靠模型编。** 对话端点复用 `analyze.py` 的 `_fetch_form`/`_fetch_fund` 取真实放量倍数、东财净流入、`fund_asof`,拼进 DeepSeek 的 context 段(同 `build_user_prompt` 现有做法)。`fund_asof` 随响应返回,客户端**仍用 DeepAnalysisCard 那条资金时序标注**("资金面 = 截至 {date} EOD · 东财主力口径(非盘中实时)")显示在对话区顶部或每条 assistant 气泡下(见 E2)。system prompt 硬性要求模型只依据注入事实、诚实交代资金口径。
-
-**决定 5:「全仓买入并录入」绿按钮从深析卡搬到对话区。** 对话式无三轴卡,故:初始深析 assistant 气泡返回后,**若旁路 verdict == 可进 且当前是候选模式**,在该气泡下方渲染「全仓买入并录入 / 看下一只」按钮组(复用现有 `buyFromAnalysis()`)。verdict 非"可进"则不显按钮。
-
-**决定 6:护栏在 system prompt 定死,守味隔离沿用阶段3。** 对话 system prompt 硬编:诚实交代资金=东财 moneyflow_dc EOD(非盘中实时);绝不越 -5%/+15%/D4 铁律、不替用户扣扳机(只给判断不替决策);中性 `history_digest` 才进 prompt,带情绪 `review_ref` **绝不进对话 prompt**(沿 `brain.py` 两路径分流)。对话端点**只注入 history_digest,不取 review_ref**(review_ref 是 coach 红橙卡专属,对话区不用)。
-
-**决定 7:对话超时不复用 `/analyze` 的 12s(堵 plan-critic 致命1:prose 生成慢会系统性降级)。** `stream=False` 下 DeepSeek 整段生成完才回首字节,read timeout 卡的是**整段生成时间**;现 `_READ_TIMEOUT=12s` 是按三轴紧凑结构(~3.3s)调的,对话 reply 几百字生成 15–25s 属正常 → 复用 12s×3 会全被掐死、每次被掐上游照样计费,且慢生成与卡死连接无法区分。**对策两条并用**:① `CHAT_SYSTEM_PROMPT` 硬限 reply 长度(~200–250 字)+ payload 设 `max_tokens`(防截断 JSON,取值见 A2)压住生成时长;② 对话**单列一组超时常量**:`_CHAT_READ_TIMEOUT=25s` / `_CHAT_CONNECT_TIMEOUT=6s` / `_CHAT_MAX_ATTEMPTS=2`。总预算重算:数据补全(form+fund+sentiment ~2–4s)+ 2×(connect + read 25)——**现实最坏 ≈ 2×25+4 ≈ 54s**(connect 实测亚秒,EdgeOne 0.009s);**理论最坏(含 connect 也超时)≈ 2×(6+25)+4 ≈ 66s > 客户端 60s**,该极端由客户端 60s 超时走 C3 失败路径(追加本地降级文案、不弹错不崩)兜底——服务端稍后完成的响应被丢弃、即便落库也是真 verdict 无污染,可接受。对话链路**不复用** `deepseek.py` 现有 `_READ_TIMEOUT/_MAX_ATTEMPTS`(那组留给 `/analyze`/`/coach` 结构化短响应)。
-
-### 4.1 端点契约(定死,施工逐字段对齐)
-
-**新增端点:`POST /api/v1/chat`**(鉴权同 `require_token`)。
-
-请求体:
-```json
-{
-  "mode": "candidate | coach",          // candidate=候选深析对话 / coach=持仓追问对话
-  "code": "002184",                     // 6 位裸码(客户端已 _bare);coach 模式此码仅参考,
-                                         //   后端一律以 position_id 对应持仓的 pos["code"] 为准(同现 /coach)
-  "messages": [                          // 多轮历史(含本轮用户最新一条),OpenAI 风格
-    {"role": "user", "content": "分析一下海得控制,这个位置能不能进?"},
-    {"role": "assistant", "content": "..."},
-    {"role": "user", "content": "那如果明天低开我该怎么办?"}
-  ],
-  "position_id": 12                      // 仅 coach 模式必带(取 pnl_pct/trade_day);candidate 模式省略
-}
-```
-> 注:candidate 模式 name/sector 后端用现成 `_resolve_candidate_meta(bare)`[app.py:566] 从候选缓存补,**客户端不传**;role 只允许 `user`/`assistant` 两值(见 C3 序列化契约,`.coach`/`.analyze` 前端映射后不出现)。
-
-响应体(**上游失败仍 HTTP 200,返降级占位**):
-```json
-{
-  "ok": true,
-  "code": "002184",
-  "reply": "<DeepSeek 自由中文分析,concise ~200–250 字>",
-  "verdict": "可进 | 观望 | 不进",       // 机器可读旁路(客户端据此决定是否显买入按钮)
-  "fund_asof": "2026-07-02",            // 资金基准日(东财 EOD),客户端显时序标注
-  "is_first": true,                      // 是否本 thread 首条(= messages 里 assistant 条数==0)
-  "degraded": false                      // 上游降级标记(缺 key/超时/非法 JSON → true);
-                                         //   落 analysis_verdicts 的必要条件之一(见契约要点)
-}
-```
-
-契约要点:
-- **`is_first` 判定**:后端按请求 `messages` 里 `role=="assistant"` 的条数为 0 判定"这是初始深析"。
-- **买入按钮显示条件(客户端)**:`is_first==true && mode=="candidate" && verdict=="可进"`。
-- **落 `analysis_verdicts` 条件(后端,三者同时)**:`is_first==true && mode=="candidate" && degraded==false`(verdict 已由 `clamp_chat` 保证 ∈{可进,观望,不进})。取 entry_date 复用 `candidate_entry_date_of`,查不到不落。**`degraded==false` 是硬门槛**(见决定2:堵降级观望覆盖真可进的回测污染)。
-- **降级**:缺 `DEEPSEEK_API_KEY`/超时/非法 JSON/卡死重试耗尽 → `reply` 返诚实降级文案("深判暂不可用,维持纪律:止损 -5%、止盈 +15%、满 3 交易日第 4 日清仓。")、`verdict="观望"`、`degraded=true`、`fund_asof` 仍如实返回。**绝不抛崩**。走对话专属超时(决定7:read 25s / attempts 2,不复用 12s×3)。
-- **coach 模式**:`position_id` 指向的持仓不存在/已 closed → **404 `not_holding`**(同 `/coach`)。存在则以 `pos["code"]` 为准,后端拉一拍实时价算 `pnl_pct` + `count_holding_trade_days` 算 `trade_day`,拼进 context(同 `/coach`)。
-- **超时预算**:客户端 `/chat` 超时 **60s**;服务端对话链路总预算 ≈54s(决定7),留余量。
-
-**DeepSeek 输出契约(对话式)**:新增 system prompt(`prompt.py` 的 `CHAT_SYSTEM_PROMPT`),要求模型返回 `{"reply": "...", "verdict": "可进|观望|不进"}` 的 JSON(仍走 `response_format=json_object`;prompt 天然含 "json" 字样满足 json mode 要求)。`reply` 是自然语言(concise ~200–250 字,可含换行分段),**不是三轴结构**。服务端 `clamp_chat(raw)` 夹紧:`reply` 非空字符串否则降级文案(空/非法 → `degraded_chat`);`verdict` 越界 → 观望。复用 `_loads_lenient` 容错(长 reply 撞 `max_tokens` 截成非法 JSON → 降级,与限长同解)。
-
-**不改的端点**:`/candidates/{code}/analyze`、`/positions/{id}/coach`、`GET /candidates`、回测端点全部原样保留(客户端 openCoach 触损分支仍调 `/coach` 走红橙卡,见 C4 决策)。
-
-### 4.2 Phase 拆分
-
-依赖顺序:A(后端对话端点)→ B(前端候选行按钮,可与 A 并行)→ C(前端对话渲染,依赖 A)→ D(部署)。A 是全栈枢纽,先落。
-
----
-
-**Phase A —— 后端对话端点 `POST /chat`(后端)**
-
-A1. **`prompt.py` 加对话 system prompt + user prompt 拼装**:
-- 新增 `CHAT_SYSTEM_PROMPT`:蒸馏现 `SYSTEM_PROMPT` 的三维度方法论(形态主轴→资金确认→消息排雷)+ 离场铁律(-5%/+15%/D4)+ 中间地带二元 + 历史纪律 guardrail,但**输出格式改为**:严格 JSON `{"reply": "<自由中文分析,可分段,用『』或换行组织,不用 markdown 标题>", "verdict": "可进|观望|不进"}`。硬编护栏:只依据注入事实、诚实交代资金=东财 EOD 非盘中实时、绝不越铁律、不替用户扣扳机(只判断不替决策)、verdict 只按当前这一笔客观判定(不因历史破线系统性调保守)。
-- 新增 `build_chat_context_block(context) -> str`:把标的/形态/资金/舆情/fund_asof/history_digest 拼成一段**注入事实**(复用 `build_user_prompt` 的形态/资金/舆情文案逻辑),作为一条 `role=system` 或首条 `role=user` 的事实前缀。不含 review_ref。
-
-A2. **`deepseek.py` 加 `chat(messages, context, *, transport=None) -> dict`**:
-- 拼 `payload.messages` = `[{system: CHAT_SYSTEM_PROMPT}, {system: build_chat_context_block(context)}, *messages]`(历史原样透传;事实块用 system 角色)。`response_format=json_object`、`temperature=0.3`、`max_tokens=700`(压住 ~250 字中文 reply + verdict 的 JSON 不被截断)。
-- **对话专属超时常量(决定7,不复用 12s×3)**:`_CHAT_CONNECT_TIMEOUT=6.0` / `_CHAT_READ_TIMEOUT=25.0` / `_CHAT_MAX_ATTEMPTS=2`;循环结构复用现 `analyze()` 的"全新连接重试"骨架,仅换这组常量。
-- 新增 `degraded_chat(reason) -> dict` = `{"reply": "深判暂不可用,维持纪律:止损 -5%、止盈 +15%、满 3 交易日第 4 日清仓。", "verdict": "观望", "degraded": True}`;`chat()` 成功路径返回 `{..., "degraded": False}`(**degraded 标记是决定2 的硬要求**)。`clamp_chat(raw)` 夹紧 reply(空/非法 → 走 `degraded_chat`)/verdict(越界→观望),成功夹紧的结果标 `degraded=False`。缺 key/超时/非 200/非 JSON → `degraded_chat`。
-- 可注入 `transport`(`httpx.MockTransport`)免单测联网。
-
-A3. **`analyze.py` 加 `chat_stock(code, messages, *, mode, name, sector, pnl_pct, trade_day, history_digest, now, *_fn)` 编排**:
-- 复用 `_fetch_form`/`_fetch_fund` 取真实形态+资金(东财 `ts_moneyflow_dc`),算 `fund_asof`(取实际数据最新交易日,同现逻辑);best-effort 舆情。
-- **事实块每轮都注入(堵 plan-critic 重要6:口径统一)**:`chat_stock` **不判 is_first、每轮都补全 form/fund/sentiment**,保证追问轮 DeepSeek 也拿到真实事实(用户常在追问里问资金/形态)。为免每轮重拉 daily(130 天)+adj_factor+moneyflow+舆情白付 2–4s,**加进程内 `(bare_code, fund_asof_date)` 级缓存(当日 TTL)**:`_fetch_form`/`_fetch_fund`/`sentiment` 结果按 `(code, 当日 YYYYMMDD)` 缓存,同一 thread 内追问命中缓存不重拉。缓存为模块级 dict + 简单日期键失效(跨日自然失效),失败不缓存(下轮重试)。不引第三方缓存库。
-- 拼 context dict(含 history_digest,**不含 review_ref**)→ 调 `deepseek.chat(messages, context)` → 返回 `{"reply", "verdict", "fund_asof", "degraded"}`(degraded 透传自 `deepseek.chat`)。可注入 `chat_fn`/`daily_fn`/`moneyflow_fn`/`sentiment_fn`/`adj_factor_fn`。全链路降级不崩。
-
-A4. **`app.py` 加 `POST /api/v1/chat` 端点 + schema**:
-- `schemas.py` 加 `ChatRequest`(mode: Literal["candidate","coach"]、code: str、messages: List[ChatMessageIn{role: Literal["user","assistant"], content: str}]、position_id: Optional[int])。role 只允许 user/assistant → 非法 role 由 pydantic 抛 422(客户端已保证映射,见 C3)。
-- 端点逻辑:① `bare = _bare_code(body.code)`(candidate 模式用它;coach 模式下方以 pos code 覆盖);② coach 模式校验 `position_id` 持仓存在否则 404 `not_holding`,**取 `bare = pos["code"]`**(忽略 body.code,同现 `/coach`);③ coach 拉实时价算 `pnl_pct` + `count_holding_trade_days` 算 `trade_day`(candidate 模式两者 None);④ candidate 模式 `name, sector = _resolve_candidate_meta(bare)`(客户端不传);⑤ `history_digest, _ = _coach_brain(bare)`(**只取 digest,丢弃 review_ref**);⑥ `is_first = sum(1 for m in body.messages if m.role=="assistant") == 0`;⑦ 调 `_chat_fn(bare, messages, mode, name, sector, pnl_pct, trade_day, history_digest)`(可注入桥,同 `_analyze_fn` 模式);⑧ **落库(决定2 硬门槛)**:`if is_first and body.mode=="candidate" and not result["degraded"]: _maybe_persist_verdict(bare, {"verdict": result["verdict"]})`;⑨ 返回 `{ok, code: bare, reply, verdict, fund_asof, is_first, degraded}`。
-- 加模块级 `_chat_fn = _default_chat_fn` 可注入替身(签名对齐 ⑦)。
-
-A5. **单测(注入 transport/替身,不联网)**:candidate 首条对话返 reply+verdict+degraded=false、is_first=true、可进时落 analysis_verdicts;追问轮(messages 含 assistant)is_first=false、不落库;**降级路径(缺 key/超时)返 degraded=true 且 is_first=true 时也不落 analysis_verdicts**(堵决定2 污染);coach 模式非持仓 404;coach 模式 body.code 与 pos code 不一致时以 pos code 为准(拉 pnl/trade_day 用 pos code);缺 key/超时 → 降级 reply + verdict=观望 + 仍 200;history_digest 进 prompt 而 review_ref 不进(断言 build_chat_context_block 输出不含 review_ref 措辞);多轮 messages 原样透传进 payload;`chat_stock` 同一 thread 追问命中数据缓存不重拉(断言 daily_fn 调用次数)。
-
-**验收标准 A**:`POST /chat` candidate 模式真 key 冒烟返 concise 自由中文 reply(~200–250 字)+ 合法 verdict + fund_asof + degraded=false;coach 模式非持仓 404、持仓存在以 pos code 为准;缺 key 降级返 200 占位 reply + degraded=true;`analysis_verdicts` 仅首条候选对话**且非降级**时落库(追问不落、降级不落);回测端点 `GET /candidates/outcomes` 的 verdict 维度仍能 join 到对话产生的 verdict;对话超时用专属 25s×2(不复用 12s×3);pytest 全绿(新增 ≥7 条),无回归。
-
----
-
-**Phase B —— 候选行只有「深析」按钮进(前端 · iOS + macOS)**
-
-B1. **去掉整行 Button**:`CandidatesView.swift` iOS `candidateList`(:80-84)与 macOS `candidateList`(:196-200)的 `ForEach` 里,去掉包裹整行的 `Button(action: openAnalysis)`,`CandidateRow` 直接渲染(整行不可点)。
-
-B2. **iOS 行「深析」真按钮**:iOS 行(`iosRow`)当前右侧竖排是"价/涨/chevron"。**改为**:去掉 chevron,右侧竖排价/涨之下放一个**紧凑「深析」Button**(复用 macOS 的 `analyzeButton` 样式,尺寸按 iOS 窄屏缩小),`action: { Task { await model.openAnalysis(code: c.code) } }`。照 CLAUDE.md「iOS 候选行布局 ≠ macOS」——按钮放右侧竖排、不挤中列(名/警告/放量条)。
-
-B3. **macOS「深析」真按钮**:`analyzeButton`(:482-496)当前是纯 `Text`(假按钮),macOS `macRow` 的 `analyzeButton.frame(...)`(:403)包成真 `Button(action: { Task { await model.openAnalysis(code: c.code) } })`。行其余列不可点;去外层整行 Button 后,**顺手删 `macRow` 的 `.contentShape(Rectangle())`(:407)**(整行热区已无意义,留着徒增行级 hit-test)。iOS `iosRow` 的 `.contentShape(:362)` 同理评估:若整行不再可点则一并删。
-
-B4. **`xcodegen generate` 后双端 App target build**(改 View 必跑,全局经验;无新增 .swift 文件,B 只改现有文件,可不重生 project,但仍必须双端 build 验证)。
-
-**验收标准 B**:iOS + macOS 候选行点行空白区**不进深析**,点「深析」按钮**进深析**;iOS 行布局窄屏不挤坏中列(名字不被省略号截断);双端 `BUILD SUCCEEDED`;客户端单测无回归。可视核对走 `ImageRenderer` 离屏快照(Dock 守卫下的退路,见 CLAUDE.md)。
-
----
-
-**Phase C —— 初始深析对话化 + 追问接 DeepSeek(前端 · iOS + macOS)**
-
-C1. **`APIClient.swift` 加 `chat(...)`**:
-- 新增 `ChatResult { reply: String; verdict: Verdict; fundAsof: String; isFirst: Bool }` + 私有 `ChatResponse`(ok/code/reply/verdict/fund_asof/is_first)。
-- `func chat(mode: String, code: String, messages: [ChatTurn], positionId: Int? = nil) async throws -> ChatResult`,`POST /api/v1/chat`,**timeout: 60**。`ChatTurn` = `{role: String, content: String}` Encodable。verdict 解码用现 `Verdict`(rawValue 中文)。
-
-C2. **`AppModel.openAnalysis` 改走 `/chat`(候选深析对话化)**:
-- 保留进全屏 + 顶栏 context + 首条 user 气泡逻辑;**`runAnalyze` 改为 `runChat`**:调 `client.chat(mode:"candidate", code:, messages: 由 thread 映射为 [ChatTurn])`,把 `r.reply` 追加为 **assistant 气泡**(`ChatMessage(role:.assistant, text: r.reply)`),`self.fundAsof = r.fundAsof`。**不再 append `.analysis` 结构化卡**。
-- **买入按钮判定用专用字段,不留三选一(堵 plan-critic 重要4)**:`AppModel` 新增 `var firstVerdict: Verdict? = nil`、`var firstAssistantMsgId: UUID? = nil`。**仅当 `r.isFirst == true`** 时写这两个字段(记首条 assistant 气泡的 id + 其 verdict);追问轮(`isFirst==false`)**不覆盖**——这样追问翻"不进"不会让买入按钮回溯消失。`backFromAnalysis()` 清空这两字段(与 thread 一起 reset)。
-
-C3. **`sendComposer` 真接 DeepSeek(多轮追问)**:
-- `sendComposer()` **改 async**:append user 气泡后,把当前 thread 映射为 `[ChatTurn]`(见下序列化契约)回传 `client.chat(mode:, code: selectedCode, messages:, positionId:)`,追加返回 `reply` 为 assistant 气泡,刷新 `fundAsof`。**删除写死文案 `"我先看量能…"`**(AppModel.swift:421)。失败追加降级 assistant 文案(不弹 toast)。composer 发送时 `analysisLoading` 转圈(复用 thinkingRow)。
-- **mode 判定不复用 `chatMode`(堵 plan-critic 致命3-b)**:`chatMode` 是 UI 语义(`openCoach` 中间地带刻意设 `.analyze`,AppModel.swift:375),复用它会把持仓中间地带追问当候选发出、丢 position_id + pnl/trade_day。**改为按业务状态判**:`let isHolding = holding(byCode: selectedCode ?? "") != nil`;`mode = isHolding ? "coach" : "candidate"`;`positionId = isHolding ? holding(byCode:)?.id : nil`。是持仓一律 coach 模式带 positionId。
-- **thread→[ChatTurn] 序列化契约(堵 plan-critic 致命3-a)**:`ChatRole` 四值需显式映射到后端只认的 `user`/`assistant`:`.user → "user"`;`.assistant → "assistant"`;`.coach →` 序列化为 `"assistant"`(content 取 `msg.text`,即红橙卡的 reason 文案);`.analysis →` **跳过不序列化**(结构卡无自然语言 content,序列化会污染上下文)。**非法映射会撞后端 `Literal["user","assistant"]` 422**,故映射必须收敛到两值。抽成 `AppModel.chatTurns(from thread) -> [ChatTurn]` 纯函数便于单测。
-- **截断(堵 plan-critic 建议)**:映射后**保留最近 8 轮(≤16 条)**,且**从 `user` 边界截起**(截断后首条必须是 user,避免 assistant 打头的畸形序列);**必须保留最近一条 assistant**(保证追问轮后端 `is_first` 判定恒 false)。首条深析被截出窗无妨(事实块每轮后端重注入)。
-- **AnalysisView 调用点同步改(堵 plan-critic 重要8)**:`AnalysisView.swift:264`(`.onSubmit { model.sendComposer() }`)与 `:266`(发送按钮 `action`)两处 `sendComposer()` 调用改 `{ Task { await model.sendComposer() } }`。
-- **失败路径预期行为(plan-critic 重要8 记录)**:C3 失败追加降级 assistant 文案后,该 thread 此后 `is_first` 恒 false(assistant 条数≥1),真 verdict 落不了库除非退出重进——**这是可接受的预期行为**(降级本就不该落库,退出重进会重新首判),不视为缺陷。
-
-C4. **「全仓买入并录入」按钮在对话区承接 + 死代码诚实处理**:
-- **买入按钮渲染条件(不留三选一,配 C2 专用字段)**:在 assistant 气泡下方,当 **`msg.id == model.firstAssistantMsgId && model.firstVerdict == .enter && !isHolding(selectedCode)`**(candidate 模式)时,渲染「全仓买入并录入 / 看下一只」按钮组(复用现 `buyFromAnalysis()`,iOS cover↔sheet 同帧交接坑照旧 `presentModalAfterCoverDismiss`)。追问轮 verdict 变化不影响该判定(firstVerdict 只在 isFirst 时写)。
-- **资金时序标注**:("资金面 = 截至 {fundAsof} EOD · 东财主力口径(非盘中实时)")移到**对话区顶部 context 条下方一行**,持续可见(`fundAsof` 非空时显)。不再依赖 DeepAnalysisCard。
-- **`.analysis` 渲染分支处理(堵 plan-critic 重要5:承认是死代码,不用不成立理由保留)**:v1.2.1 后候选深析不再产 `.analysis` 消息、coach 触损走 `.coach`(从不产 `.analysis`),故 `AnalysisView.swift` 的 `.analysis` case(:97)+ `analysisBlock`(:142-172)含其内旧买入按钮(:151-168)是**彻底死代码**,与 C4 新按钮构成两条买入路径。**处理:删除 `messageView` 的 `.analysis` case 分派 + `analysisBlock` 整个方法**(`DeepAnalysisCard` 结构体本体**保留**——`SnapshotRenderTests.swift` 快照测试引用它,删本体会破测试)。`ChatMessage.analysis` 字段(Models.swift:166)保留(契约字段,coach `.coach` 卡的 `analysis` 参数仍用)。若 builder 认为删分支风险高,退路是保留分支但**在代码注释标注"dead since v1.2.1,回滚锚"**——二选一,不得用"coach 红橙卡仍用"这类不成立理由搪塞(coach 红橙卡走 `.coach` 不走 `.analysis`)。
-- **coach 触损路径决策(定死)**:`openCoach` 触损分支**保持走 `/coach`**(红橙卡 + review_ref 历史引用 + 标记次日清仓按钮),**不改对话式**——反情绪教练红橙卡是纪律干预 UI,结构化更有威慑力且依赖 review_ref 展示。**本版本:openCoach 触损走 /coach 红橙卡不动;中间地带(非触损)分支也暂留 /coach 二元气泡;只有候选深析(openAnalysis)+ composer 追问走 /chat**。coach 卡入口不变,红橙卡与回测 verdict 都不受影响。
-
-C5. **`xcodegen generate`(APIClient 无新文件则免;若拆新文件则必跑)后双端 App target build**。
-
-**验收标准 C**:候选点「深析」→ 进全屏 → 首条 user 气泡 + assistant **自由中文分析气泡**(非三轴卡)+ 顶部资金时序标注;首条 verdict==可进 时对应气泡下显「全仓买入并录入」按钮、追问翻"不进"按钮**不消失**(firstVerdict 只在 isFirst 写),点击预填开仓 sheet;composer 追问 → 真调 `/chat` 多轮 → assistant 返上下文相关回答(不再固定文案);**持仓中间地带 composer 追问以 coach 模式 + 带 positionId 发出**(mode 不复用 chatMode);`chatTurns(from:)` 映射把 `.coach→assistant`/`.analysis→跳过`、截断从 user 边界起且保留最近一条 assistant(单测断言);`AnalysisView:264/266` 两处 sendComposer 调用改 async;缺 token/降级返占位 reply 不弹错;双端 `BUILD SUCCEEDED`;客户端单测无回归(`testSendComposer*` 改 async + 新增 chatTurns 序列化/截断单测)。
-
----
-
-**Phase D —— 全量部署上线(全栈 · 运维,两步走)**
-
-> 拆两步(堵 plan-critic 重要7:store 拆包从没上生产 + v1.2.1 一次全量出问题无法归因)。**部署前记录当前 `git rev-parse HEAD` 作回滚锚**;每步前 ECS `cp linon.db linon.db.bak-YYYYMMDD`(无新 migration,照高危区姿势)。
-
-D1. **第一步:先部署当前 main(store 拆包 + moneyflow_dc 收口态,清"已完工未部署"欠账)**:全量 `sync.sh` rsync(不再单文件热补丁)→ 重启 `linon.service` → 冒烟 `/candidates`·`/analyze`·`/coach` 三端点公网 200 照常。**两项 rsync 后检查**(store.py→包重构首上生产的坑):① ECS 上 `app/db/store.py`(旧单文件)**应不存在**——openrsync `--delete` 若未生效/守卫被绕会留 stale 单文件与包并存;并清 `app/db/__pycache__/store.*.pyc`(旧字节码残留会遮蔽包)。② 确认 `app/db/store/__init__.py` 等包文件在位。验通(服务 active + 三端点照常)才进 D2。
-
-D2. **第二步:部署 v1.2.1 新增**(`prompt.py`/`deepseek.py`/`analyze.py`/`app.py`/`schemas.py`)→ 重启 → 端到端验通:`POST /chat` candidate 模式公网 HTTPS 200 返真实 concise reply + verdict + fund_asof + degraded=false;coach 模式非持仓 404、持仓存在返对话;缺 key 时降级 reply(ECS `.env` 已有 key,应返真);`analysis_verdicts` 首条候选对话落库、追问/降级不落;客户端 Release 换包核对候选行只深析按钮进 + 对话渲染。**内存峰值观察**(那台 1.6G+2G swap 箱子,对话端点 messages 更长但不批量拉全市场,压力应低于 refresh 的 926MB 峰;若逼近上限记 Backlog)。
-
-**验收标准 D**:D1 后 store 拆包重构上 ECS **无 stale 单文件残留**、309 行为无回归(服务 active、`/candidates`/`/analyze`/`/coach` 照常);D2 后公网 `/chat` 端到端返真实对话 + verdict + degraded 标记正确、落库门槛生效;客户端 Release 包候选行交互 + 对话渲染真机/真窗口核对通过;记录了回滚 git SHA;`~/Lino/hz_info.md` 同步更新(两步部署动作事实)。
-
-### 4.3 施工纪律与坑提示(施工必读)
-
-- **绿涨红跌**、规则常量单一源(`store/constants.py` 的 -5.0/+15/D4/容差带,禁另写)、`count==4⟺should_force_close` 契约**全部不动**。对话 prompt 引用铁律只是文案,不新立常量。
-- **守味隔离铁律**:对话端点 context **只注入 history_digest(中性统计),绝不注入 review_ref(带情绪)**。`_coach_brain` 返回 `(digest, ref)`,对话端点丢弃 ref。违反即串味。
-- **DeepSeek 降级链全程不崩**(缺 key/超时/卡死→降级 reply + verdict=观望 + degraded=true);对话**不复用** `/analyze` 的 12s×3(决定7:prose 生成慢会系统性降级),用对话专属 `_CHAT_READ_TIMEOUT=25`/`_CHAT_CONNECT_TIMEOUT=6`/`_CHAT_MAX_ATTEMPTS=2` + `max_tokens=700` + reply 限长 ~250 字;客户端 `/chat` 超时 60s。全新连接重试骨架沿 CLAUDE.md 坑6。
-- **资金源=东财 `moneyflow_dc`**,`fund_asof` 取实际数据最新交易日(本会话刚修);对话 reply 里资金口径由 system prompt 约束诚实交代,日期由客户端标签权威显示(prompt 不写死日期)。
-- **改 .swift**:B 只改现有文件、C 若拆新文件必 `xcodegen generate`;改 View 必跑 **iOS + macOS 双端 App target build**。Dock 守卫下可视核对走 `ImageRenderer` 离屏快照(注意不渲 ScrollView 内容,组件单独裹 VStack 渲)。
-- **后端可注入替身免联网**:`_chat_fn`/`chat_fn`/`transport` 沿 `_analyze_fn`/`send_push(transport=)` 模式。
-- **回测链路不能断,且降级绝不污染**:对话首条候选 verdict 必须经 `_maybe_persist_verdict` 落 `analysis_verdicts`(取 `candidate_entry_date_of` entry_date,查不到不落),否则 `GET /candidates/outcomes` verdict 维度断供;但**落库前必过 `not degraded` 门槛**(决定2:对话 thread 重开频繁 + upsert 覆盖式,降级观望会覆盖真可进污染回测)。
-- **买入按钮判定单一事实源**:`firstVerdict`/`firstAssistantMsgId` 只在 `isFirst==true` 写、`backFromAnalysis` 清;不用"每轮覆盖的 lastVerdict",防追问翻脸让按钮回溯消失。
-- **mode 是业务状态非 UI 状态**:composer 追问 mode 按 `holding(byCode:) != nil` 判,**不复用 `chatMode`**(那是 UI 语义,中间地带刻意设 .analyze);role 序列化收敛到 user/assistant 两值,否则后端 422。
+> 下一版本待规划。v1.2.1(深析对话化 + 追问接 DeepSeek)已完工收口并上线,全文见 `archive/v1.2.1_plan.md` + `archive/REVIEW_REPORT_v1.2.1.md`。
 
 ## 4b. 客户端契约(设计稿钉死,阶段 1+ 生效)
 
@@ -314,6 +150,17 @@ D2. **第二步:部署 v1.2.1 新增**(`prompt.py`/`deepseek.py`/`analyze.py`/`a
 ### v1.2.1 立项发现(plan-critic 提出,本版本不动)
 
 - **`/analyze` 端点 `_maybe_persist_verdict` 同款降级污染隐患**:`POST /candidates/{code}/analyze` 的 `_maybe_persist_verdict`(app.py:357)只查 `verdict in _VERDICTS`,DeepSeek 降级返回的"观望"会照落 `analysis_verdicts`(覆盖式 upsert),理论上真"可进"可能被一次降级观望覆盖污染回测。v1.2.1 只给**新增的 `/chat` 端点**加了 `not degraded` 落库门槛(对话 thread 重开频繁,污染概率高);`/analyze` 是 on-demand 单次触发、污染概率低,**本版本不动其行为**,留未来给 `degraded_analysis` 补 degraded 标记后统一收口。
+
+### reviewer v1.2.1 推迟项(全 🔵 建议级 + 1 遗留,零致命零重要;全文见 `archive/REVIEW_REPORT_v1.2.1.md`)
+
+- **(打磨)composer loading 时未禁用**:发送中可并发再次点发送,产生双份 `is_first` 请求;可给 composer 输入框/发送按钮在 `analysisLoading` 时禁用。
+- **(测试加固)`chatTurns` while 修剪分支无测试覆盖**:截断逻辑"从 user 边界起、保留最近一条 assistant"的 while 循环分支未补对应单测,行为靠人工验证。
+- **(测试加固)两条 `chat_stock` 降级测试受前序缓存影响**:进程内 `(code,date)` 事实缓存改 `and` 条件后需复核这两条降级测试是否仍独立可信(不因跑序污染)。
+- **(测试环境)`test_chat_missing_key` 本机有真 token 时会单测联网**:该测试依赖环境无 `DEEPSEEK_API_KEY` 才触发降级路径,本机若已配置真 key 会绕过降级分支实际联网。
+- **(清理)`_chat_fact_cache` 旧键不清除**:进程内 dict 缓存按 `(code,date)` 键只增不减,单用户长期运行体量可控可接受,重启即清。
+- **(清理)客户端死代码**:`analyzeCandidate` 已无调用点、`ChatResult.degraded` 字段解出后未被读取,可删。
+- **(打磨)`/chat` 后端无 `messages` 条数上限**:客户端已截断到 8 轮,但后端未做防御性上限校验,理论上可传超长 messages 拖慢/拖垮请求。
+- **(遗留)`build_user_prompt:84-86` 同款硬编"中间地带"**:阶段2 遗留的硬编中间地带措辞,v1.2.1 已在对话层 `build_chat_context_block` 改为按 pnl 派生,但结构化 `/analyze`/`/coach` 走的 `build_user_prompt` 同款硬编仍在,留 Backlog 统一收口。
 
 ### iOS 快捷指令截图录买卖(设计已讨论,未立项,下一版本候选)
 
@@ -397,3 +244,4 @@ D2. **第二步:部署 v1.2.1 新增**(`prompt.py`/`deepseek.py`/`analyze.py`/`a
 - **[2026-07-02] ECS→DeepSeek 偶发卡死 → 重试快修(真环境·已上线)**:客户端超时修完后露出后端"调用异常 ReadTimeout"降级卡。上 ECS 只读诊断确认**非资源/非 MTU/非 DeepSeek 慢**——内存/负载全闲、`ping -M do` 1500B 全通、DeepSeek 从 Mac ~4s·从 ECS 连打 8 次全 <1s;**是 ECS→api.deepseek.com(腾讯 EdgeOne CDN)偶发单连接读响应体卡死**(`TTFB=0.2s` 秒回但 `total` 打满超时空体)。修 `deepseek.py`:**短读超时(12s)+ 每次全新连接重试(3 次)**,好连接亚秒~数秒、撞卡死的快速放弃重试;最坏 36s < 客户端 60s。pytest 309 无回归;单文件热补丁 scp 到 ECS + restart,3/3 `/analyze` 端到端返真实卡 ~3.3s 验通。详见 CLAUDE.md 坑6。
 - **[2026-07-02] v1.2.1(深析对话化 + 追问接 DeepSeek)立项**:§4 落定 4 Phase(A 后端对话端点 / B 候选行按钮 / C 前端对话渲染 / D 全量部署)。**核心架构决定(6 条,已拍死)**:① 新增统一多轮对话端点 `POST /chat`,**不合并进** `/analyze`/`/coach`(二者结构化输出被回测链路 `analysis_verdicts` + coach 红橙卡依赖,保留不动);② 对话 = prose `reply` + 旁路抽 `verdict` 落库(仅候选首条对话落 `analysis_verdicts`,不断回测链路);③ 后端无状态,多轮上下文客户端持有、每次全量回传(截断保留最近 8 轮)、不落会话表;④ 资金/形态事实由后端 `_fetch_form`/`_fetch_fund` 注入 context(不靠模型编)、`fund_asof` 随响应返回;⑤「全仓买入并录入」按钮从三轴卡搬到对话区(首条 assistant 气泡下、verdict==可进 时显);⑥ 守味隔离沿阶段3——对话端点**只注入 history_digest,绝不注入 review_ref**。coach 触损红橙卡入口不变(不改对话式),只有候选深析(openAnalysis)+ composer 追问走 /chat。含一次全量部署(顺带带上未部署的 store 拆包重构,不再单文件热补丁)。**plan-critic 一轮修订(3 致命 + 5 重要,均已改)**:致命——① 对话 prose 生成慢会被 `/analyze` 的 12s×3 超时系统性掐死降级 → 对话单列超时常量(read 25s×2)+ reply 限长 250 字 + `max_tokens=700`(决定7);② 降级"观望"覆盖式落 `analysis_verdicts` 污染回测 → `chat/degraded_chat` 加 `degraded` 标记、落库门槛收紧 `not degraded`(决定2);③ 追问 mode 复用 UI 状态 `chatMode` 会把持仓中间地带当候选发出丢 position_id + `.coach`/`.analysis` role 序列化撞后端 422 → mode 改按 `holding(byCode:)` 业务判、role 显式映射收敛到 user/assistant 两值(C3)。重要——④ 买入按钮判定钉死 `firstVerdict`/`firstAssistantMsgId` 只在 isFirst 写(防追问翻脸按钮回溯消失);⑤ `.analysis` 渲染分支承认是死代码删除(DeepAnalysisCard 本体留给快照测试),不用"coach 卡仍用"不成立理由保留;⑥ 事实块每轮注入 + 进程内 `(code,date)` 缓存免重拉;⑦ Phase D 拆两步部署(先 store 拆包收欠账、再 v1.2.1)+ stale 单文件/pyc 清理检查 + 回滚 SHA;⑧ 客户端漏改的 `AnalysisView:264/266` 两处 sendComposer 调用点补 async。`/analyze` 同款降级污染隐患记 §5 Backlog(本版本不动)。待 plan-critic 复核 3 致命是否堵死。
 - **[2026-07-02] 深析资金源修正:切东财 `moneyflow_dc`(6000 积分)+ fund_asof 如实标注(真环境·已上线)**:用户发现深析卡「主力净流出」与候选列表「+4473万流入」及其同花顺 App 相反。查因:**深析层 `analyze.py` 误用原始 `moneyflow`(同花顺式,与东财口径不同、能符号相反),没用上 6000 积分买的东财 `moneyflow_dc`**;且 `fund_asof` 写死 `prev_trading_day`,盘后把 07-02 的数据误标成 07-01。实测四源(用户同花顺 +1627 / 东财 +2657 / 原始 moneyflow −2102 / Tushare 同花顺源 moneyflow_ths −2105)确认"主力资金"无统一标准、各家口径不同,东财是唯一与用户方向一致且干净的。**修**:① `analyze.py` 深析资金源切 `ts_moneyflow_dc`(`_fetch_fund` 兼容 `net_amount`/`net_mf_amount` 字段);② `fund_asof` 取实际数据最新交易日(盘后=今日、盘中=上一交易日),失败才退回占位;③ `prompt.py` 去掉写死"截至上一交易日",正文聚焦资金强弱、日期由客户端标签权威显示;④ 客户端文案改"资金面 = 截至 {date} EOD · 东财主力口径(非盘中实时)"。pytest 309 / macOS build 无回归。三文件热补丁 scp 到 ECS + restart,端到端验通:002184 现返 **fund_asof=07-02、近3日+4473万流入、当日+2657万、verdict 可进**、正文无"上一交易日"。CLAUDE.md 资金时序两条同步订正。
+- **[2026-07-02] v1.2.1 完工收口并上线**:新增统一 `POST /chat` 多轮对话端点(不动 `/analyze`/`/coach`,回测链路与教练红橙卡照旧)+ 对话 prose reply + 旁路 verdict 落库(仅首条候选对话且非降级才落,堵覆盖式污染)+ 对话专属超时 25s×2 + 双端候选行改真「深析」按钮唯一入口 + 初始深析对话化 + composer 追问真接 DeepSeek + 删 `.analysis` 结构化卡死代码(`DeepAnalysisCard` 本体留供快照测试)。走完整工作流:planner→plan-critic 一轮修订(3 致命堵死:对话专属超时/降级不落库门槛/mode 按业务状态判非 UI 状态)→builder(Phase A–C)→reviewer(致命 0、2 重要——coach 区间措辞按 pnl 派生、事实缓存条件改 and——均已修)。门禁:后端 pytest 337、客户端 XCTest 49、双端 `BUILD SUCCEEDED`。**两步全量部署**(先补 store 拆包重构首次真上生产、再上 v1.2.1 新增)端到端验通:`/chat` 生产返 181 字自由对话、fund_asof 07-02、东财资金流入正常。全文 `archive/v1.2.1_plan.md` + `archive/REVIEW_REPORT_v1.2.1.md`。
