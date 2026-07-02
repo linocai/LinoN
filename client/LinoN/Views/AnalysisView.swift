@@ -362,7 +362,7 @@ struct DeepAnalysisCard: View {
                 HStack(spacing: 5) {
                     Image(systemName: "info.circle")
                         .font(.system(size: 10, weight: .semibold)).foregroundStyle(LN.textTertiary)
-                    Text("资金面 = 截至 \(fundAsof) EOD,今日盘中资金未知")
+                    Text("资金面 = 截至 \(fundAsof) EOD · 东财主力口径(非盘中实时)")
                         .font(.system(size: 10.5)).foregroundStyle(LN.textTertiary)
                 }
             }

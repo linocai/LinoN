@@ -101,18 +101,25 @@ def _fetch_form(
 
 
 def _fetch_fund(code: str, moneyflow_fn: Callable) -> Dict[str, Any]:
-    """近 ~5 交易日 moneyflow → 近 3 日主力净流入合计 + 当日。失败 → 占位(标注缺失)。"""
+    """近 ~5 交易日主力资金 → 近 3 日主力净额合计 + 当日 + 实际数据基准日。失败 → 占位。
+
+    源 = 东财 moneyflow_dc(字段 net_amount);兼容老 moneyflow(net_mf_amount)供注入测试。
+    asof = 实际拿到的最新交易日(盘后=今日、盘中=上一交易日)——供 fund_asof 如实标注,
+    不再无视数据写死上一交易日。
+    """
     today = date.today()
     end = today.strftime("%Y%m%d")
     start = (today - timedelta(days=12)).strftime("%Y%m%d")
     res = moneyflow_fn(code, start, end)
     if not res.ok or res.data is None or len(res.data) == 0:
-        return {"net_mf_3d": "—", "net_mf_amount": "—", "_degraded": True}
+        return {"net_mf_3d": "—", "net_mf_amount": "—", "asof": None, "_degraded": True}
     df = res.data.sort_values("trade_date", ascending=False).reset_index(drop=True)
-    amounts = [float(x) for x in df["net_mf_amount"].tolist()]
+    col = "net_amount" if "net_amount" in df.columns else "net_mf_amount"  # 东财 / 老源兼容
+    amounts = [float(x) for x in df[col].tolist()]
     net_today = round(amounts[0], 2) if amounts else 0.0
     net_3d = round(sum(amounts[:3]), 2) if amounts else 0.0
-    return {"net_mf_3d": net_3d, "net_mf_amount": net_today, "_degraded": False}
+    asof = str(df["trade_date"].iloc[0])   # 'YYYYMMDD' 最新交易日 = 实际数据基准
+    return {"net_mf_3d": net_3d, "net_mf_amount": net_today, "asof": asof, "_degraded": False}
 
 
 # —— 编排 ————————————————————————————————————————————————————————
@@ -144,16 +151,25 @@ def analyze_stock(
     可注入 *_fn 免单测联网(adj_factor_fn 阶段2.5 新增,沿 daily_fn 模式)。
     """
     daily_fn = daily_fn or tc.ts_daily
-    moneyflow_fn = moneyflow_fn or tc.ts_moneyflow
+    # 资金源 = 东财 moneyflow_dc(6000 积分,net_amount=超大单+大单主力净额)。与选股层
+    # (fetch.py)统一、与用户同花顺/东财 App 方向一致;原始 moneyflow 口径不同、能到符号相反,
+    # 已弃用(2026-07-02 修:深析层此前误用原始 moneyflow,给出与候选列表相反的净流出)。
+    moneyflow_fn = moneyflow_fn or tc.ts_moneyflow_dc
     sentiment_fn = sentiment_fn or sentiment.fetch_sentiment
     deepseek_fn = deepseek_fn or deepseek.analyze
     adj_factor_fn = adj_factor_fn or tc.ts_adj_factor
 
     bare = _bare(code)
-    fund_asof = fund_asof_date(now)
 
     form = _fetch_form(bare, daily_fn, adj_factor_fn)
     fund = _fetch_fund(bare, moneyflow_fn)
+    # fund_asof 取实际拿到的资金最新交易日(盘后=今日 EOD、盘中=上一交易日);拉取失败无
+    # 数据 → 退回"严格上一交易日"占位。不再无视数据写死上一交易日(修 07-02 盘后误标 07-01)。
+    _asof_raw = fund.get("asof")
+    fund_asof = (
+        f"{_asof_raw[:4]}-{_asof_raw[4:6]}-{_asof_raw[6:8]}" if _asof_raw
+        else fund_asof_date(now)
+    )
     try:
         news = sentiment_fn(bare)
     except Exception as e:
