@@ -22,7 +22,12 @@ logger = logging.getLogger(__name__)
 
 _API_URL = "https://api.deepseek.com/v1/chat/completions"
 _MODEL = "deepseek-chat"
-_TIMEOUT = 30.0
+# ECS→DeepSeek(经腾讯 EdgeOne CDN)偶发单连接卡死:健康连接亚秒~数秒完成,坏连接读响应体
+# 卡到超时(实测 ECS 连打 8 次全 <1s;偶发一发 45s 空体超时即此病)。故「短读超时 + 每次全新
+# 连接重试」——撞上卡死的快速放弃,重试基本立刻命中好连接。最坏 3×12=36s < 客户端 60s(仍会降级)。
+_CONNECT_TIMEOUT = 6.0
+_READ_TIMEOUT = 12.0
+_MAX_ATTEMPTS = 3
 
 # 合法枚举(校验夹紧用,与 Models.swift 对齐)
 _TONES = {"good", "warn", "bad", "neutral"}
@@ -113,15 +118,24 @@ def analyze(context: Dict[str, Any], *, transport: Optional[Any] = None) -> Dict
         "Content-Type": "application/json",
     }
 
-    try:
-        client_kwargs: Dict[str, Any] = {"timeout": _TIMEOUT}
-        if transport is not None:
-            client_kwargs["transport"] = transport
-        with httpx.Client(**client_kwargs) as client:
-            resp = client.post(_API_URL, json=payload, headers=headers)
-    except Exception as e:   # 超时/网络/连接异常一律降级
-        logger.warning("DeepSeek 调用异常(降级): %s", e)
-        return degraded_analysis(f"调用异常 {type(e).__name__}")
+    # 短读超时 + 全新连接重试(见常量注释):ECS→EdgeOne 偶发单连接卡死,重试基本立刻命中好连接。
+    timeout = httpx.Timeout(_READ_TIMEOUT, connect=_CONNECT_TIMEOUT)
+    resp = None
+    last_exc = None
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            client_kwargs: Dict[str, Any] = {"timeout": timeout}
+            if transport is not None:
+                client_kwargs["transport"] = transport
+            with httpx.Client(**client_kwargs) as client:
+                resp = client.post(_API_URL, json=payload, headers=headers)
+            break   # 拿到 HTTP 响应(含非 200)即停,交下方状态处理
+        except Exception as e:   # 超时/网络/连接异常 → 换新连接重试
+            last_exc = e
+            logger.warning("DeepSeek 调用第 %d/%d 次异常(将重试): %s", attempt, _MAX_ATTEMPTS, e)
+    if resp is None:   # 全部尝试都异常 → 降级
+        logger.warning("DeepSeek %d 次均失败,降级", _MAX_ATTEMPTS)
+        return degraded_analysis(f"调用异常 {type(last_exc).__name__}")
 
     if resp.status_code != 200:
         logger.warning("DeepSeek 非 200(%s,降级)", resp.status_code)
