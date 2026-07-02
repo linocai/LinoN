@@ -154,10 +154,6 @@ struct CandidatesViewMac: View {
                  : "EOD 数据 · 截至 \(model.candidatesTradeDate) 收盘")
                 .font(.system(size: 12.5)).foregroundStyle(LN.textTertiary)
             Spacer()
-            Text("排序:放量强度 ▾")
-                .font(.system(size: 12)).foregroundStyle(LN.textSecondary)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 8).fill(LN.textSecondary.opacity(0.06)))
             Button(action: { Task { await model.recomputeCandidates() } }) {
                 HStack(spacing: 5) {
                     if model.candidatesRefreshing { ProgressView().controlSize(.small) }
@@ -187,6 +183,7 @@ struct CandidatesViewMac: View {
             Text("放量倍数").frame(width: 132, alignment: .leading)
             Text("主力净流入").frame(width: 92, alignment: .trailing)
             Text("换手").frame(width: 56, alignment: .trailing)
+            Text("分数").frame(width: 54, alignment: .trailing)
             Spacer().frame(width: 70)
         }
         .font(.system(size: 11, weight: .semibold)).tracking(0.4)
