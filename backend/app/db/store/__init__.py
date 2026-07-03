@@ -5,7 +5,7 @@
 
   constants     规则常量单一事实源(-5.0/+15.0/D4/容差带、MAX_HOLDINGS)——只此一处定义
   _common       连接/时间/路径底层工具(get_connection / _now / _db_path)
-  schema        建表 DDL + 迁移(_ensure_trades_columns / _ensure_candidates_columns)+ init_db
+  schema        建表 DDL + 迁移(_ensure_trades_columns / _ensure_candidates_columns / _ensure_v130_columns)+ init_db
   positions     持仓开/清仓 + 在持查询 + 派生止损止盈 + 机械纪律判定
   trades        trades 只读聚合(复盘打分数据源)
   review        reviews / memory 读写(复盘注记 + 闭环结论沉淀)
@@ -64,6 +64,7 @@ from app.db.store.schema import (
     _SCHEMA,
     _ensure_candidates_columns,
     _ensure_trades_columns,
+    _ensure_v130_columns,
     init_db,
 )
 from app.db.store.trades import list_all_trades, list_closed_trades

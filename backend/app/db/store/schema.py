@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS positions (
     status         TEXT    NOT NULL DEFAULT 'holding',
     created_at     TEXT    NOT NULL
     -- 止损线不落库:= buy_price × 0.95 读取时派生(单一事实源)
+    -- industry 列由 _ensure_v130_columns() 迁移补充(v1.3.0,ALTER ADD COLUMN,不在此 DDL)
 );
 
 CREATE TABLE IF NOT EXISTS trades (
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS trades (
     broke_rule  INTEGER NOT NULL,             -- bool(标红依据)
     created_at  TEXT    NOT NULL
     -- name/note 两列由 _ensure_trades_columns() 迁移补充(阶段3,ALTER ADD COLUMN,不在此 DDL)
+    -- qty/fee/net_pnl_amount 三列由 _ensure_v130_columns() 迁移补充(v1.3.0,不在此 DDL)
 );
 
 CREATE TABLE IF NOT EXISTS reviews (
@@ -157,6 +159,40 @@ def _ensure_candidates_columns(conn: sqlite3.Connection) -> None:
         log.error("candidates 补列(score)迁移异常(已吞,不拖垮 startup)", exc_info=True)
 
 
+def _ensure_v130_columns(conn: sqlite3.Connection) -> None:
+    """v1.3.0 合并 migration(项目第三次真 migration,🔴高危区)。
+
+    一次补 positions.industry(②相关性护栏,开仓落库,本 Phase 只建列不写值)+
+    trades.qty/fee/net_pnl_amount(④净额复盘,清仓落库)。与 _ensure_trades_columns /
+    _ensure_candidates_columns 完全同套姿势:PRAGMA table_info 精确集合探测 → 缺列则
+    ALTER TABLE ADD COLUMN;整段 try/except **只 log.error,不 re-raise**——init_db 跑在
+    app.py lifespan 启动路径、每次 ECS 重启都执行,迁移绝不能拖垮整个交易监控服务的 startup。
+
+    **positions/trades 有真实持仓/成交数据,故 ALTER 不 DROP 重建**(存量已闭合 trades
+    的三新列为 NULL,净额契约 nullable,读旧行原样传 null;存量 holding 的 industry
+    为 NULL,相关性护栏对 NULL 行业跳过、降级不误报)。三新列均 nullable(无 NOT NULL /
+    无默认值),存量行不受影响。
+
+    **🔵4 迁移失败后果差异**:新列 INSERT 硬编落在开仓 + 清仓两条关键录入路径,迁移
+    静默失败 = 录不了仓(比阶段3"少个展示列"重);仍用只 log 不 re-raise 的既有姿势
+    (不为此改 fail-fast——录入路径本就有 try/except → 409/404 兜底),Plan §4 已接受。
+    """
+    try:
+        pos_cols = {row[1] for row in conn.execute("PRAGMA table_info(positions)")}  # row[1] = 列名
+        if "industry" not in pos_cols:
+            conn.execute("ALTER TABLE positions ADD COLUMN industry TEXT")
+        trade_cols = {row[1] for row in conn.execute("PRAGMA table_info(trades)")}
+        for col, coltype in (("qty", "INTEGER"), ("fee", "REAL"), ("net_pnl_amount", "REAL")):
+            if col not in trade_cols:
+                conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {coltype}")
+    except Exception:
+        log.error(
+            "v1.3.0 补列(positions.industry + trades.qty/fee/net_pnl_amount)迁移异常"
+            "(已吞,不拖垮 startup)",
+            exc_info=True,
+        )
+
+
 def init_db(db_path: Optional[str] = None) -> str:
     """建表(幂等)+ trades/candidates 补列迁移。返回落库路径。"""
     path = _db_path(db_path)
@@ -165,6 +201,7 @@ def init_db(db_path: Optional[str] = None) -> str:
         conn.executescript(_SCHEMA)
         _ensure_trades_columns(conn)        # 阶段3 G3:trades 补 name/note(幂等,失败不拖垮)
         _ensure_candidates_columns(conn)    # 阶段3.1:candidates 补 score(幂等,失败不拖垮)
+        _ensure_v130_columns(conn)          # v1.3.0:positions.industry + trades.qty/fee/net_pnl_amount
         conn.commit()
     finally:
         conn.close()

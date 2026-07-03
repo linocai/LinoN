@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
+from app.trade import costs
 from app.db.store._common import _now, get_connection
 from app.db.store.constants import (
     FORCE_CLOSE_TRADE_DAY,
@@ -212,16 +213,32 @@ def close_position(
         name = row["name"]                       # 从 position 取(阶段3 G3 补列)
         note = _mechanical_comment(flags)        # 机械短评(守住铁律/破止损/破时间)
 
+        # v1.3.0 Phase B2:交易成本 + 净收益金额(🔴金额计算,元)。
+        # qty 从 position 带出(positions.qty NOT NULL,理论恒有值);算不出/缺失时兜底
+        # fee=0、net=毛收益 —— **不阻断清仓**(全自动、不手填、不硬闸,用户明确要求)。
+        try:
+            qty = int(row["qty"])
+        except (KeyError, IndexError, TypeError, ValueError):
+            qty = 0
+        if qty > 0:
+            fee = costs.total_fee(open_price * qty, close_price * qty)
+            net_pnl = costs.net_pnl_amount(open_price, close_price, qty)
+        else:
+            fee = 0.0
+            net_pnl = round((close_price - open_price) * qty, 2)  # qty=0 → 0.0(兜底,不硬闸)
+
         cur = conn.execute(
             """INSERT INTO trades
                (code, open_price, close_price, open_time, close_time,
-                kept_stop, kept_take, kept_time, pnl, broke_rule, created_at, name, note)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                kept_stop, kept_take, kept_time, pnl, broke_rule, created_at, name, note,
+                qty, fee, net_pnl_amount)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 row["code"], open_price, close_price, open_time, ctime,
                 int(flags["kept_stop"]), int(flags["kept_take"]),
                 int(flags["kept_time"]), pnl_pct, int(flags["broke_rule"]), _now(),
                 name, note,
+                qty, fee, net_pnl,
             ),
         )
         trade_id = int(cur.lastrowid)

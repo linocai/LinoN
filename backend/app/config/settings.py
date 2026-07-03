@@ -44,6 +44,12 @@ try:
         APNS_USE_SANDBOX: bool = True              # dev 直装走 sandbox 网关
         ESCALATE_INTERVAL_MIN: int = 15            # 硬线未 ack 的升级重复间隔(分钟)
 
+        # —— v1.3.0 Phase B1:交易成本费率(沪深口径,费用单一源;公式在 app/trade/costs.py)——
+        COMMISSION_RATE: float = 0.00028           # 佣金率(万2.8,买卖各一次)
+        COMMISSION_MIN: float = 5.0                # 最低佣金(元/笔)
+        STAMP_TAX_RATE: float = 0.0005             # 卖出印花税(0.05%,仅卖出)
+        TRANSFER_FEE_RATE: float = 0.00001         # 过户费率(0.001%,沪深买卖双边)
+
         model_config = SettingsConfigDict(
             env_file=str(_ENV_FILE),
             env_file_encoding="utf-8",
@@ -116,6 +122,13 @@ except ImportError:  # pragma: no cover - 仅在依赖未装时走到
                 except (ValueError, TypeError):
                     return default
 
+            def pick_float(key: str, default: float) -> float:
+                raw = pick(key, None)
+                try:
+                    return float(raw) if raw is not None else default
+                except (ValueError, TypeError):
+                    return default
+
             self.TUSHARE_TOKEN: Optional[str] = pick("TUSHARE_TOKEN", None)
             self.DEEPSEEK_API_KEY: Optional[str] = pick("DEEPSEEK_API_KEY", None)
             self.DB_PATH: str = pick("DB_PATH", _DEFAULT_DB_PATH) or _DEFAULT_DB_PATH
@@ -126,6 +139,11 @@ except ImportError:  # pragma: no cover - 仅在依赖未装时走到
             self.APNS_KEY_PATH: Optional[str] = pick("APNS_KEY_PATH", None)
             self.APNS_USE_SANDBOX: bool = pick_bool("APNS_USE_SANDBOX", True)
             self.ESCALATE_INTERVAL_MIN: int = pick_int("ESCALATE_INTERVAL_MIN", 15)
+            # —— v1.3.0 Phase B1:交易成本费率(与主路径字段/默认值一致)——
+            self.COMMISSION_RATE: float = pick_float("COMMISSION_RATE", 0.00028)
+            self.COMMISSION_MIN: float = pick_float("COMMISSION_MIN", 5.0)
+            self.STAMP_TAX_RATE: float = pick_float("STAMP_TAX_RATE", 0.0005)
+            self.TRANSFER_FEE_RATE: float = pick_float("TRANSFER_FEE_RATE", 0.00001)
 
         @property
         def has_tushare_token(self) -> bool:

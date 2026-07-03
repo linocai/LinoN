@@ -136,8 +136,9 @@ class ReviewOut(BaseModel):
     redFlags: List[str]
     lessons: str = ""
     nextWeekNote: str = ""
+    netPnlTotal: Optional[float] = None   # v1.3.0:周净额合计(元,可空:无非空净额行 → null)
     trend: List[Dict[str, Any]]           # [{label, value}]
-    trades: List[Dict[str, Any]]          # [{name, code, pnl, tag, comment}]
+    trades: List[Dict[str, Any]]          # [{name, code, pnl, netPnlAmount(可空), tag, comment}]
     openHoldings: List[Dict[str, Any]]    # [{name, code, buyPrice, tradeDay}]
     sampleNote: str = ""
 
@@ -150,4 +151,4 @@ class ReviewNoteIn(BaseModel):
 class MemoryOut(BaseModel):
     """GET /memory 响应(plan §4.3)。items = memory 条目;closedTrades = 已平仓 trades 流水。"""
     items: List[Dict[str, Any]]           # [{kind, content, date}]
-    closedTrades: List[Dict[str, Any]]    # [{name, code, pnl, keptStop, keptTake, keptTime, brokeRule, note, date}]
+    closedTrades: List[Dict[str, Any]]    # [{name, code, pnl, netPnlAmount(可空), keptStop, keptTake, keptTime, brokeRule, note, date}]

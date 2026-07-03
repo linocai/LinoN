@@ -196,8 +196,9 @@ def close_position(position_id: int, body: PositionClose):
             detail={"ok": False, "reason": "not_holding"},
         )
 
-    # 回读该 trade 的机械判定结果
+    # 回读该 trade 的机械判定结果 + 净额(v1.3.0 Phase B4)
     flags = _read_trade_flags(trade_id)
+    # fee/net_pnl_amount:新清仓总有实值;旧行(迁移前)为 NULL → 原样传 null(不兜 0.0)。
     return {
         "ok": True,
         "trade_id": trade_id,
@@ -206,6 +207,8 @@ def close_position(position_id: int, body: PositionClose):
         "kept_take": bool(flags["kept_take"]),
         "kept_time": bool(flags["kept_time"]),
         "broke_rule": bool(flags["broke_rule"]),
+        "fee": flags.get("fee"),
+        "net_pnl_amount": flags.get("net_pnl_amount"),
     }
 
 
@@ -619,6 +622,7 @@ def get_memory() -> MemoryOut:
             "name": t.get("name") or str(t.get("code", "")),   # NULL 兜底回 code
             "code": str(t.get("code", "")),
             "pnl": f"{pnl:+.1f}%",
+            "netPnlAmount": _net_amount_of(t),                 # 元,可空(旧 NULL 行 → null,🟡1)
             "keptStop": bool(int(t.get("kept_stop", 0))),
             "keptTake": bool(int(t.get("kept_take", 0))),
             "keptTime": bool(int(t.get("kept_time", 0))),
@@ -636,6 +640,18 @@ def _date_part(ts: Optional[str]) -> str:
     if not ts:
         return ""
     return str(ts).split(" ")[0].split("T")[0]
+
+
+def _net_amount_of(t: dict) -> Optional[float]:
+    """trade 行的净收益金额(元,可空)。v1.3.0 迁移前的旧行 net_pnl_amount 为 NULL → None
+    (不兜 0.0,🟡1;区分"没数据"vs"真 0 元")。真 0.0 收益原样返 0.0。"""
+    raw = t.get("net_pnl_amount")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 # —— 深判编排桥(可注入测试替身)————————————————————————————————————————
@@ -723,11 +739,12 @@ def _read_trade_flags(trade_id: int) -> dict:
     conn = store.get_connection()
     try:
         row = conn.execute(
-            "SELECT pnl, kept_stop, kept_take, kept_time, broke_rule "
+            "SELECT pnl, kept_stop, kept_take, kept_time, broke_rule, fee, net_pnl_amount "
             "FROM trades WHERE id = ?", (trade_id,)
         ).fetchone()
     finally:
         conn.close()
     return dict(row) if row is not None else {
-        "pnl": 0.0, "kept_stop": 0, "kept_take": 0, "kept_time": 0, "broke_rule": 0
+        "pnl": 0.0, "kept_stop": 0, "kept_take": 0, "kept_time": 0, "broke_rule": 0,
+        "fee": None, "net_pnl_amount": None,
     }

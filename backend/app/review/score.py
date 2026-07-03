@@ -161,6 +161,7 @@ def aggregate_week(
     # redFlags + 每笔 ReviewTrade
     red_flags: List[str] = []
     review_trades: List[Dict[str, Any]] = []
+    net_vals: List[float] = []                 # v1.3.0:本周非空净额行(供 netPnlTotal)
     for t in week_trades:
         flags = _flags_of(t)
         name = _trade_name(t)
@@ -168,13 +169,19 @@ def aggregate_week(
         broke = bool(int(t.get("broke_rule", 0)))
         if broke:
             red_flags.append(_red_flag_line(name, flags, pnl_val))
+        net_amt = _net_pnl_of(t)               # 旧 NULL 行 → None(不兜 0.0,🟡1)
+        if net_amt is not None:
+            net_vals.append(net_amt)
         review_trades.append({
             "name": name,
             "code": str(t.get("code", "")),
             "pnl": _fmt_pnl(pnl_val),
+            "netPnlAmount": net_amt,            # 元,可空(旧行 NULL → null,不是 0.0)
             "tag": "red" if broke else "good",
             "comment": _mechanical_comment(flags),
         })
+    # netPnlTotal:周内无任何非空净额行 → None(D 端显"—");否则 = 非空行之和,四舍五入到分。
+    net_pnl_total: Optional[float] = round(sum(net_vals), 2) if net_vals else None
 
     # 近 6 ISO 周 trend(无交易的周补 0)
     trend = _build_trend(week, all_trades)
@@ -199,6 +206,7 @@ def aggregate_week(
         "redFlags": red_flags,
         "lessons": "",                 # 本阶段留空串(LLM 生成 lessons 属 OUT)
         "nextWeekNote": "",            # 端点层从 reviews 表补(store.get_review_note)
+        "netPnlTotal": net_pnl_total,  # v1.3.0:周净额合计(元,可空:无非空净额行 → None)
         "trend": trend,
         "trades": review_trades,
         "openHoldings": open_holdings,
@@ -233,6 +241,23 @@ def _pnl_of(t: Dict[str, Any]) -> float:
         return float(t.get("pnl", 0.0) or 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _net_pnl_of(t: Dict[str, Any]) -> Optional[float]:
+    """净收益金额(元,可空)。v1.3.0 迁移前的旧行无此列/值为 NULL → 返 None(不兜 0.0,🟡1)。
+
+    ⚠️ 与 _pnl_of 不同:真 0 元收益(net_pnl_amount==0.0)必须原样返 0.0,只有
+    键缺失 / SQLite NULL(dict 取到 None)才返 None——区分"没数据"vs"真 0 元"。
+    """
+    if "net_pnl_amount" not in t:
+        return None
+    raw = t.get("net_pnl_amount")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _rate_of(trades: List[Dict[str, Any]]) -> int:
