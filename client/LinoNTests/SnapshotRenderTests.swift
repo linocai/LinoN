@@ -120,12 +120,6 @@ final class SnapshotRenderTests: XCTestCase {
         render(macRow, size: CGSize(width: 900, height: 120), name: "candidate_row_nilscore_mac")
     }
 
-    func testRenderCandidatesClosed() {
-        // 满仓闭门空态(ClosedEmptyCard 非 ScrollView 包裹)。
-        render(ClosedEmptyCard().padding(16),
-               size: CGSize(width: 390, height: 320), name: "candidates_closed")
-    }
-
     func testRenderCoachCardBlock() {
         // 教练红橙卡本体(直接渲染 coachBlock 等价的红橙卡组件,避开 ScrollView)。
         let card = VStack(alignment: .leading, spacing: 11) {

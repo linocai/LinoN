@@ -72,6 +72,10 @@ struct ClosePositionResponse: Decodable {
     let kept_take: Bool
     let kept_time: Bool
     let broke_rule: Bool
+    // v1.3.0 Phase B4/D1:净额(元,可空)。新清仓总有实值;迁移前旧行不适用(此响应仅新清仓才产,
+    // 理论恒有值,仍按契约可空解码,防御任何后端边界)。
+    let fee: Double?
+    let net_pnl_amount: Double?
 }
 
 struct DeviceRegisterRequest: Encodable {
@@ -79,9 +83,26 @@ struct DeviceRegisterRequest: Encodable {
     let platform: String   // "ios"
 }
 
+// MARK: - v1.3.0 Phase A/D2:三仓相关性护栏(GET /positions/correlation)
+
+/// 相关性冲突明细一行(与待买同行业的已持仓)。
+struct CorrelationHolding: Decodable, Equatable {
+    let code: String
+    let name: String
+    let industry: String
+}
+
+/// GET /positions/correlation 响应(只提示不拦;降级恒 conflict:false,HTTP 200)。
+struct CorrelationResult: Decodable, Equatable {
+    let ok: Bool
+    let conflict: Bool
+    let industry: String
+    let conflictWith: [CorrelationHolding]
+}
+
 // MARK: - 阶段2:候选 / 深判 / 教练(plan §4.3)
 
-/// GET /candidates 响应(plan §4.3:满仓/无缓存 → degraded + 空列表)。
+/// GET /candidates 响应(v1.3.0 起满仓不再闭门,固定 Top 20;无缓存 → degraded + 空列表)。
 struct CandidatesResult {
     let candidates: [Candidate]
     let freeSlots: Int
@@ -210,10 +231,13 @@ private struct ReviewResponse: Decodable {
     let trades: [ReviewTradeDTO]
     let openHoldings: [OpenHoldingDTO]
     let sampleNote: String
+    // v1.3.0 Phase D1:周净额合计(元,可空;旧行/无净额行的周 → null)。
+    let netPnlTotal: Double?
 
     struct WeekPointDTO: Decodable { let label: String; let value: Int }
     struct ReviewTradeDTO: Decodable {
         let name: String; let code: String; let pnl: String; let tag: String; let comment: String
+        let netPnlAmount: Double?   // v1.3.0:可空,旧行 → nil 显"—"
     }
     struct OpenHoldingDTO: Decodable {
         let name: String; let code: String; let buyPrice: Double; let tradeDay: Int
@@ -234,6 +258,8 @@ struct ClosedTradeRow: Identifiable {
     let keptStop: Bool; let keptTake: Bool; let keptTime: Bool; let brokeRule: Bool
     let note: String
     let date: String
+    /// v1.3.0 Phase D1:净收益金额(元,可空;旧行 nil → 展示"—")。
+    let netPnlAmount: Double?
 }
 
 private struct MemoryResponse: Decodable {
@@ -245,6 +271,7 @@ private struct MemoryResponse: Decodable {
         let name: String; let code: String; let pnl: String
         let keptStop: Bool; let keptTake: Bool; let keptTime: Bool; let brokeRule: Bool
         let note: String; let date: String
+        let netPnlAmount: Double?   // v1.3.0:可空,旧行 → nil 显"—"
     }
 }
 
@@ -317,6 +344,12 @@ actor APIClient {
         return try JSONDecoder().decode(OpenPositionResponse.self, from: data)
     }
 
+    // —— v1.3.0 Phase D2:三仓相关性护栏(只在买入路径查询,提示性、失败静默由调用方处理)——
+    func fetchCorrelation(code: String) async throws -> CorrelationResult {
+        let data = try await get("/api/v1/positions/correlation?code=\(code)")
+        return try JSONDecoder().decode(CorrelationResult.self, from: data)
+    }
+
     // —— 清仓 ——
     func closePosition(id: Int, _ req: ClosePositionRequest) async throws -> ClosePositionResponse {
         let data = try await post("/api/v1/positions/\(id)/close", body: req)
@@ -339,7 +372,7 @@ actor APIClient {
         return true
     }
 
-    // —— 阶段2:拉候选(GET /candidates;后端已按 5×free_slots 运行时截断)——
+    // —— 阶段2:拉候选(GET /candidates;v1.3.0 起后端固定返 Top CANDIDATE_LIMIT=20,不再按持仓截断)——
     func fetchCandidates() async throws -> CandidatesResult {
         let data = try await get("/api/v1/candidates")
         let resp = try JSONDecoder().decode(CandidatesListResponse.self, from: data)
@@ -413,12 +446,14 @@ actor APIClient {
             trend: r.trend.map { WeekPoint(label: $0.label, value: $0.value) },
             trades: r.trades.map {
                 ReviewTrade(name: $0.name, code: $0.code, pnl: $0.pnl,
-                            tag: ReviewTag(rawValue: $0.tag) ?? .good, comment: $0.comment)
+                            tag: ReviewTag(rawValue: $0.tag) ?? .good, comment: $0.comment,
+                            netPnlAmount: $0.netPnlAmount)
             },
             openHoldings: r.openHoldings.map {
                 OpenHolding(name: $0.name, code: $0.code, buyPrice: $0.buyPrice, tradeDay: $0.tradeDay)
             },
-            sampleNote: r.sampleNote
+            sampleNote: r.sampleNote,
+            netPnlTotal: r.netPnlTotal
         )
     }
 
@@ -441,7 +476,7 @@ actor APIClient {
             ClosedTradeRow(name: $0.name, code: $0.code, pnl: $0.pnl,
                            keptStop: $0.keptStop, keptTake: $0.keptTake,
                            keptTime: $0.keptTime, brokeRule: $0.brokeRule,
-                           note: $0.note, date: $0.date)
+                           note: $0.note, date: $0.date, netPnlAmount: $0.netPnlAmount)
         }
         return MemoryResult(items: items, closedTrades: closed)
     }

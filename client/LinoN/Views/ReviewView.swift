@@ -176,6 +176,9 @@ private struct ScoreHero: View {
                     .font(.system(size: 48, weight: .bold, design: .rounded)).foregroundStyle(.white)
                 Text("执行率 \(review.disciplineRate)% · \(trendLabel)")
                     .font(.system(size: 12)).foregroundStyle(.white.opacity(0.9))
+                // v1.3.0 Phase D1:周净额合计(nil → "—",不假装 0 元)。
+                Text("本周净额 \(LNFmt.netAmount(review.netPnlTotal))")
+                    .font(.system(size: 11.5).monospacedDigit()).foregroundStyle(.white.opacity(0.85))
             }
             Spacer()
             HStack(spacing: 16) {
@@ -274,9 +277,15 @@ private struct ReviewTradeCard: View {
                     Text(trade.name).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(LN.textPrimary)
                     Text(trade.code).font(.system(size: 11)).foregroundStyle(LN.textTertiary)
                     Spacer()
-                    Text(trade.pnl)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(pnlColor)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(trade.pnl)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(pnlColor)
+                        // v1.3.0 Phase D1:净收益金额(nil → "—";着色派生 bool,非字符串判负)。
+                        Text(LNFmt.netAmount(trade.netPnlAmount))
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(netPnlColor(trade.netPnlAmount))
+                    }
                 }
                 Text(trade.comment).font(.system(size: 12)).foregroundStyle(LN.textSecondary)
             }

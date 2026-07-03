@@ -4,6 +4,8 @@
 //
 //  开仓字段:代码/名称/买入价/数量/进场理由;止损线只读派生 买入价×0.95,拒绝手填。
 //  清仓:该票 + 实时盈亏 + 卖出价 + 时间(默认次日开盘 09:30,只读)。
+//  v1.3.0 Phase D2:代码满 6 位或输入框失焦时查一次相关性护栏(GET /positions/correlation);
+//  命中同行业已持仓 → 表单内警示条(警告色,只提示不拦)。
 //
 
 import SwiftUI
@@ -13,11 +15,12 @@ import SwiftUI
 struct OpenFormContent: View {
     @Bindable var model: AppModel
     var compact: Bool
+    @FocusState private var codeFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
-                field("代码", text: $model.form.code, placeholder: "603606", mono: true)
+                field("代码", text: $model.form.code, placeholder: "603606", mono: true, focused: $codeFieldFocused)
                 field("名称", text: $model.form.name, placeholder: "东方电缆")
             }
             HStack(spacing: 12) {
@@ -26,6 +29,32 @@ struct OpenFormContent: View {
             }
             derivedStopRow
             field("进场理由(一句话)", text: $model.form.reason, placeholder: "平台突破 · 放量站稳")
+            correlationWarningRow
+        }
+        // 代码满 6 位即查一次(不逐字符打请求);失焦再兜底查一次(改小/粘贴场景)。
+        .onChange(of: model.form.code) { _, newValue in
+            let bare = newValue.trimmingCharacters(in: .whitespaces)
+            if bare.count == 6 { Task { await model.checkCorrelation(code: bare) } }
+        }
+        .onChange(of: codeFieldFocused) { wasFocused, isFocused in
+            if wasFocused, !isFocused { Task { await model.checkCorrelation(code: model.form.code) } }
+        }
+    }
+
+    /// 相关性警示条(警告色 amber,非红,不误导;只提示不禁用确认按钮)。命中才显示。
+    @ViewBuilder private var correlationWarningRow: some View {
+        if let conflict = model.correlationConflict, conflict.conflict, let first = conflict.conflictWith.first {
+            HStack(alignment: .top, spacing: 8) {
+                Text("⚠").font(.system(size: 13, weight: .semibold)).foregroundStyle(LN.amber)
+                Text("与持仓 \(first.name)(\(first.industry))同主线,注意仓位集中")
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(LN.amber)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: 12).fill(LN.amber.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(LN.amber.opacity(0.25), lineWidth: 0.5))
         }
     }
 
@@ -52,10 +81,17 @@ struct OpenFormContent: View {
         )
     }
 
-    private func field(_ label: String, text: Binding<String>, placeholder: String, mono: Bool = false) -> some View {
+    private func field(_ label: String, text: Binding<String>, placeholder: String, mono: Bool = false,
+                       focused: FocusState<Bool>.Binding? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(LN.textSecondary)
-            TextField(placeholder, text: text)
+            Group {
+                if let focused {
+                    TextField(placeholder, text: text).focused(focused)
+                } else {
+                    TextField(placeholder, text: text)
+                }
+            }
                 .textFieldStyle(.plain)
                 .font(.system(size: 15).monospacedDigit())
                 .foregroundStyle(LN.textPrimary)

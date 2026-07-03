@@ -1,8 +1,8 @@
 //
 //  CandidatesAnalysisTests.swift
-//  LinoN — 阶段2 前端 E1/E2 单测
+//  LinoN — 阶段2 前端 E1/E2 单测 + v1.3.0 Phase C3 候选放开
 //
-//  覆盖:满仓闭门联动(shownCandidates/openSlots/candidatesClosed)、
+//  覆盖:候选固定 Top 20(shownCandidates,v1.3.0 起满仓不再闭门)、
 //  深析卡 DeepAnalysis JSON 解码(对齐后端 dict 形状 + 枚举映射)、
 //  buyFromAnalysis 预填开仓 sheet、sendComposer / backFromAnalysis 状态机。
 //
@@ -27,42 +27,30 @@ final class CandidatesGatingTests: XCTestCase {
                  entryReason: "x", entrySnapshot: nil, buyDate: Date())
     }
 
-    func testOpenSlotsAndClosed() {
+    /// v1.3.0 Phase C3:满仓不再闭门候选,固定展示 Top 20(不因持仓数变化)。
+    func testShownCandidatesFixedTop20RegardlessOfHoldings() {
         let m = AppModel()
-        XCTAssertEqual(m.openSlots, 3)            // 空仓
-        XCTAssertFalse(m.candidatesClosed)
-        m.holdings = [makePos("a"), makePos("b"), makePos("c")]
-        XCTAssertEqual(m.openSlots, 0)            // 满仓
-        XCTAssertTrue(m.candidatesClosed)
-    }
-
-    func testShownCandidatesTruncatesByFreeSlots() {
-        let m = AppModel()
-        m.candidates = (1...20).map { makeCandidate(rank: $0, code: "c\($0)") }
-        // 空 3 仓 → 5×3 = 15
-        XCTAssertEqual(m.shownCandidates.count, 15)
-        // 持 1 → 空 2 → 5×2 = 10
-        m.holdings = [makePos("h1")]
-        XCTAssertEqual(m.shownCandidates.count, 10)
-        // 满仓 → 闭门 → 0
+        m.candidates = (1...25).map { makeCandidate(rank: $0, code: "c\($0)") }
+        XCTAssertEqual(m.shownCandidates.count, 20)   // 空仓 → 仍是 Top 20(非 5×3=15)
         m.holdings = [makePos("h1"), makePos("h2"), makePos("h3")]
-        XCTAssertEqual(m.shownCandidates.count, 0)
+        XCTAssertEqual(m.shownCandidates.count, 20)   // 满仓 → 不闭门,仍 Top 20
     }
 
     func testShownCandidatesShorterThanLimit() {
         let m = AppModel()
         m.candidates = (1...4).map { makeCandidate(rank: $0, code: "c\($0)") }
-        // 候选少于 5×freeSlots 取全部
+        // 候选少于 20 取全部
         XCTAssertEqual(m.shownCandidates.count, 4)
     }
 
-    func testHeadlineAndFootnoteCopy() {
+    func testHeadlineAndFootnoteCopyNoLongerMentionsClosedDoor() {
         let m = AppModel()
         m.candidates = (1...20).map { makeCandidate(rank: $0, code: "c\($0)") }
-        XCTAssertTrue(CandidatesCopy.headline(m).contains("空 3 仓位"))
-        XCTAssertTrue(CandidatesCopy.headline(m).contains("15"))
-        m.holdings = [makePos("h1"), makePos("h2"), makePos("h3")]
-        XCTAssertTrue(CandidatesCopy.headline(m).contains("闭门"))
+        m.holdings = [makePos("h1"), makePos("h2"), makePos("h3")]   // 满仓
+        // 满仓不再提"闭门",文案不含旧措辞。
+        XCTAssertFalse(CandidatesCopy.headline(m).contains("闭门"))
+        XCTAssertFalse(CandidatesCopy.footnote(m).contains("闭门"))
+        XCTAssertTrue(CandidatesCopy.headline(m).contains("20"))
     }
 }
 
@@ -141,6 +129,40 @@ final class AnalysisStateTests: XCTestCase {
         XCTAssertEqual(m.composer, "")
         XCTAssertNil(m.firstVerdict)
         XCTAssertNil(m.firstAssistantMsgId)
+    }
+}
+
+// MARK: - v1.3.0 Phase D2:三仓相关性护栏(checkCorrelation 触发/静默契约)
+
+@MainActor
+final class CorrelationGuardrailTests: XCTestCase {
+
+    /// 无 clientProvider(未配置后端)→ 静默清空,不崩、不弹错。
+    func testCheckCorrelationSilentWhenNoClient() async {
+        let m = AppModel()
+        m.correlationConflict = CorrelationResult(ok: true, conflict: true, industry: "白酒",
+                                                   conflictWith: [CorrelationHolding(code: "x", name: "y", industry: "白酒")])
+        await m.checkCorrelation(code: "600519")
+        XCTAssertNil(m.correlationConflict)   // 无 client → 静默清空,不保留旧值误导
+    }
+
+    /// 代码不满 6 位 → 不触发查询(不逐字符打请求),状态清空。
+    func testCheckCorrelationSkipsWhenCodeUnder6Digits() async {
+        let m = AppModel()
+        await m.checkCorrelation(code: "6005")
+        XCTAssertNil(m.correlationConflict)
+    }
+
+    /// openEntry / dismissModal 打开或关闭表单时清空上一次的相关性状态(不残留旧警示条)。
+    func testOpenEntryAndDismissModalClearCorrelationConflict() {
+        let m = AppModel()
+        m.correlationConflict = CorrelationResult(ok: true, conflict: true, industry: "白酒", conflictWith: [])
+        m.openEntry()
+        XCTAssertNil(m.correlationConflict)
+
+        m.correlationConflict = CorrelationResult(ok: true, conflict: true, industry: "白酒", conflictWith: [])
+        m.dismissModal()
+        XCTAssertNil(m.correlationConflict)
     }
 }
 
@@ -314,5 +336,71 @@ final class CandidateScoreDecodeTests: XCTestCase {
         XCTAssertNil(c.score)                // 缺字段 → nil,不抛
         XCTAssertEqual(c.rank, 1)            // 其余字段照常解码
         XCTAssertEqual(c.name, "东方电缆")
+    }
+}
+
+// MARK: - v1.3.0 Phase E:导出同花顺 TXT —— thsMarketSuffix 最长前缀优先判定
+
+final class ThsMarketSuffixTests: XCTestCase {
+
+    func testShanghaiMainBoard60() {
+        XCTAssertEqual(thsMarketSuffix("600519"), ".SH")   // 贵州茅台
+        XCTAssertEqual(thsMarketSuffix("603986"), ".SH")   // 兆易创新
+    }
+
+    func testShanghaiSTAR688And689() {
+        XCTAssertEqual(thsMarketSuffix("688981"), ".SH")   // 科创板
+        XCTAssertEqual(thsMarketSuffix("689009"), ".SH")   // 九号(CDR)
+    }
+
+    func testShanghaiPrefix9() {
+        XCTAssertEqual(thsMarketSuffix("900901"), ".SH")   // 沪 B 股等 9 前缀(非 920)
+    }
+
+    func testShenzhenMainAndChinext() {
+        XCTAssertEqual(thsMarketSuffix("000858"), ".SZ")   // 五粮液(主板 000)
+        XCTAssertEqual(thsMarketSuffix("300750"), ".SZ")   // 创业板 300
+        XCTAssertEqual(thsMarketSuffix("301051"), ".SZ")   // 创业板 301(非 300 也在 30 段)
+    }
+
+    /// 🟡3 核心验收:920xxx 必须判 .BJ,绝不能被 "9" 前缀先命中误判成 .SH
+    /// (若判定顺序颠倒 —— 先判 9 再判 920 —— 这条会失败,是防回归的关键锚点)。
+    func testBeijingExchange920MustNotBeMisclassifiedAsShanghai() {
+        XCTAssertEqual(thsMarketSuffix("920363"), ".BJ")   // 莱赛激光(北交所新段)
+        XCTAssertNotEqual(thsMarketSuffix("920363"), ".SH")
+    }
+
+    func testBeijingExchangePrefix8And4() {
+        XCTAssertEqual(thsMarketSuffix("830799"), ".BJ")   // 8 开头老北交所
+        XCTAssertEqual(thsMarketSuffix("430047"), ".BJ")   // 4 开头老三板转北交所
+    }
+
+    func testUnknownPrefixReturnsNil() {
+        // 构造一个不匹配任何已知前缀段的代码(1 开头目前无对应市场)。
+        XCTAssertNil(thsMarketSuffix("100000"))
+        XCTAssertNil(thsMarketSuffix(""))
+        XCTAssertNil(thsMarketSuffix("12345"))     // 非 6 位
+    }
+
+    func testExportTextSkipsUnknownPrefixLines() {
+        let neutral = AnalysisAxis(value: "—", tone: .neutral, text: "")
+        let a = DeepAnalysis(form: neutral, fund: neutral, news: neutral, verdict: .watch, plan: "")
+        func c(_ code: String) -> Candidate {
+            Candidate(rank: 1, name: code, code: code, sector: "", tag: "",
+                     price: 10, chg: "+1.00%", volMultiple: "1.0x", volPct: 50,
+                     flow: "+0.1亿", turnover: "1.0%", warn: nil, analysis: a)
+        }
+        let list = [c("600519"), c("100000"), c("920363"), c("300750")]
+        let text = thsExportText(list)
+        let lines = text.split(separator: "\n").map(String.init)
+        XCTAssertEqual(lines.count, 3)                 // 100000 未知前缀被跳过
+        XCTAssertTrue(lines.contains("600519.SH"))
+        XCTAssertTrue(lines.contains("920363.BJ"))
+        XCTAssertTrue(lines.contains("300750.SZ"))
+        XCTAssertFalse(text.contains("100000"))
+    }
+
+    func testExportTextEmptyCandidatesProducesEmptyString() {
+        XCTAssertEqual(thsExportText([]), "")
     }
 }

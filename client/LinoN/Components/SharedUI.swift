@@ -37,6 +37,45 @@ enum LNFmt {
         let body = nf.string(from: NSNumber(value: abs)) ?? "0"
         return (v >= 0 ? "+¥" : "−¥") + body
     }
+
+    /// v1.3.0 Phase D1:可空净额展示。nil(旧行/无数据)→ "—"(区分"没数据"vs"真0元");
+    /// 有值 → signedMoney。调用方对颜色需另用 `netPnlColor(_:)` 派生(不解析这里的字符串)。
+    static func netAmount(_ v: Double?) -> String {
+        guard let v else { return "—" }
+        return signedMoney(v)
+    }
+}
+
+/// v1.3.0 Phase D1:净额金额着色 —— 派生 bool(非字符串判负,避开 Unicode 减号"−"坑)。
+/// nil → 中性灰(未知,不该染红染绿);非 nil → (v>=0) 绿 / 红。
+func netPnlColor(_ v: Double?) -> Color {
+    guard let v else { return LN.textTertiary }
+    return v >= 0 ? LN.up : LN.down
+}
+
+// MARK: - v1.3.0 Phase E:导出同花顺 TXT —— 裸 6 位代码 → 市场后缀(纯函数,可单测)
+
+/// 裸 6 位代码 → 同花顺市场后缀。**最长前缀优先**:920 必须先于 9 判、68 必须先于 6 判,
+/// 否则北交所 920xxx 会被 "9" 前缀误判成 .SH、科创 68xxxx 会被 "6" 前缀误判成 .SH。
+/// 判定顺序:920→.BJ → 8/4→.BJ → 68/9→.SH → 60→.SH → 00/30→.SZ。
+/// 不匹配任何已知前缀 → 返回 nil(调用方 compactMap 跳过该行,不硬崩不猜)。
+func thsMarketSuffix(_ code: String) -> String? {
+    let bare = code.trimmingCharacters(in: .whitespaces)
+    guard bare.count == 6, bare.allSatisfy({ $0.isNumber }) else { return nil }
+    if bare.hasPrefix("920") { return ".BJ" }
+    if bare.hasPrefix("8") || bare.hasPrefix("4") { return ".BJ" }
+    if bare.hasPrefix("68") || bare.hasPrefix("9") { return ".SH" }
+    if bare.hasPrefix("60") { return ".SH" }
+    if bare.hasPrefix("00") || bare.hasPrefix("30") { return ".SZ" }
+    return nil
+}
+
+/// 从候选列表生成同花顺导入 TXT:每行 `裸6位.后缀`,未知前缀行跳过(compactMap)。
+func thsExportText(_ candidates: [Candidate]) -> String {
+    candidates.compactMap { c -> String? in
+        guard let suffix = thsMarketSuffix(c.code) else { return nil }
+        return c.code + suffix
+    }.joined(separator: "\n")
 }
 
 extension Double {

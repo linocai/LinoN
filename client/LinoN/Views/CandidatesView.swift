@@ -1,13 +1,19 @@
 //
 //  CandidatesView.swift
-//  LinoN — 候选列表(双端;EOD 机械排序 + 满仓闭门;照 README §2)
+//  LinoN — 候选列表(双端;EOD 机械排序 + 固定 Top 20;照 README §2)
 //
-//  iOS:大标题"候选" + 蓝解释条 + 候选卡列表 + 截断脚注;满仓 🔒 空态。
+//  v1.3.0 Phase C3:满仓闭门已删,任何持仓状态固定展示 Top 20(shownCandidates 直接
+//  取 candidates.prefix(20),后端已限 20,前端只做安全带)。
+//  iOS:大标题"候选" + 蓝解释条 + 候选卡列表 + 截断脚注;导出按钮见 header。
 //  macOS:内联工具栏(候选列表 · EOD 截至昨日收盘 + 排序徽章)+ 蓝解释条 + 列表。
-//  整卡可点 → 深析(push iOS / 覆盖内容区 macOS);满仓闭门联动由 shownCandidates 派生。
+//  整卡可点 → 深析(push iOS / 覆盖内容区 macOS)。
 //
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+import UniformTypeIdentifiers
+#endif
 
 // MARK: - iOS
 
@@ -19,9 +25,7 @@ struct CandidatesViewIOS: View {
             VStack(alignment: .leading, spacing: 14) {
                 header
                 explainBar
-                if model.candidatesClosed {
-                    ClosedEmptyCard()
-                } else if model.shownCandidates.isEmpty {
+                if model.shownCandidates.isEmpty {
                     noCandidateCard
                 } else {
                     candidateList
@@ -47,9 +51,23 @@ struct CandidatesViewIOS: View {
                     .font(.system(size: 13)).foregroundStyle(LN.textSecondary)
             }
             Spacer()
+            exportButton
             refreshButton
         }
         .padding(.horizontal, 4)
+    }
+
+    /// v1.3.0 Phase E:导出同花顺 TXT(ShareLink 分享 sheet)。空候选/降级时禁用。
+    private var exportButton: some View {
+        let text = thsExportText(model.shownCandidates)
+        return ShareLink(item: text) {
+            Image(systemName: "square.and.arrow.up").font(.system(size: 16, weight: .semibold))
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(LN.cardBg))
+                .overlay(Circle().stroke(LN.hairline, lineWidth: 0.5))
+                .foregroundStyle(LN.accent)
+        }
+        .disabled(model.shownCandidates.isEmpty || model.candidatesDegraded)
     }
 
     /// 手动刷新候选(强制重算全市场,可能数十秒;重算中转圈+禁用)。
@@ -124,9 +142,7 @@ struct CandidatesViewMac: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     CandidatesExplainBar(headline: CandidatesCopy.headline(model))
-                    if model.candidatesClosed {
-                        ClosedEmptyCard()
-                    } else if model.shownCandidates.isEmpty {
+                    if model.shownCandidates.isEmpty {
                         noCandidateCard
                     } else {
                         columnHeader
@@ -151,6 +167,7 @@ struct CandidatesViewMac: View {
                  : "EOD 数据 · 截至 \(model.candidatesTradeDate) 收盘")
                 .font(.system(size: 12.5)).foregroundStyle(LN.textTertiary)
             Spacer()
+            exportButton
             Button(action: { Task { await model.recomputeCandidates() } }) {
                 HStack(spacing: 5) {
                     if model.candidatesRefreshing { ProgressView().controlSize(.small) }
@@ -169,6 +186,35 @@ struct CandidatesViewMac: View {
         .frame(height: 52)
         .background(.ultraThinMaterial)
         .overlay(Divider().overlay(LN.hairline), alignment: .bottom)
+    }
+
+    /// v1.3.0 Phase E:导出同花顺 TXT(macOS 用 NSSavePanel 存 .txt)。空候选/降级时禁用。
+    private var exportButton: some View {
+        Button(action: exportToFile) {
+            HStack(spacing: 5) {
+                Image(systemName: "square.and.arrow.up")
+                Text("导出")
+            }
+            .font(.system(size: 12, weight: .medium))
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 8).fill(LN.accent.opacity(0.10)))
+            .foregroundStyle(LN.accent)
+        }
+        .buttonStyle(.plain)
+        .disabled(model.shownCandidates.isEmpty || model.candidatesDegraded)
+    }
+
+    private func exportToFile() {
+        #if os(macOS)
+        let text = thsExportText(model.shownCandidates)
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "候选_\(model.candidatesTradeDate.isEmpty ? "today" : model.candidatesTradeDate).txt"
+        panel.allowedContentTypes = [.plainText]
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            try? text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        #endif
     }
 
     private var columnHeader: some View {
@@ -277,24 +323,6 @@ struct CandidatesExplainBar: View {
             .background(Capsule().fill(LN.cardBg))
             .overlay(Capsule().stroke(LN.textSecondary.opacity(0.12), lineWidth: 0.5))
             .fixedSize()
-    }
-}
-
-// MARK: - 满仓闭门空态(共享)
-
-struct ClosedEmptyCard: View {
-    var body: some View {
-        VStack(spacing: 8) {
-            Text("🔒").font(.system(size: 34))
-            Text("满仓 · 候选已闭门")
-                .font(.system(size: 15, weight: .semibold)).foregroundStyle(LN.textPrimary)
-            Text("3 个仓位已满,按规则注意力交还给已持仓的票。\n清掉一只腾出仓位后,候选才会按「5 × 空仓位」重新打开。")
-                .font(.system(size: 13)).foregroundStyle(LN.textSecondary)
-                .multilineTextAlignment(.center).lineSpacing(4)
-        }
-        .frame(maxWidth: .infinity).padding(.vertical, 70).padding(.horizontal, 24)
-        .background(RoundedRectangle(cornerRadius: 14).fill(LN.cardBg))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(LN.hairline, lineWidth: 0.5))
     }
 }
 
@@ -518,13 +546,12 @@ struct CandidateRow: View {
 @MainActor
 enum CandidatesCopy {
     static func headline(_ m: AppModel) -> String {
-        if m.candidatesClosed { return "满仓 · 候选闭门 · 注意力交还给持仓" }
         let shown = m.shownCandidates.count
-        return "空 \(m.openSlots) 仓位 → 按规则截断取前 \(shown)(5 × 空仓位)"
+        return "Top \(shown) 候选 · 机械排序,满仓也照常展示"
     }
 
     static func footnote(_ m: AppModel) -> String {
         let shown = m.shownCandidates.count
-        return "已展示前 \(shown) 只 · 截断线以下合格但不在注意力范围内 · 满仓时此列表为空,注意力交还给持仓"
+        return "已展示前 \(shown) 只(固定 Top 20)· 满仓也照常展示,买不买你自己判断"
     }
 }

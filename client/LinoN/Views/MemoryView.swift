@@ -4,7 +4,7 @@
 //
 //  结论卡网格(macOS 三列 / iOS 单列):kind chip(闭环结论蓝 / 长期记忆琥珀 / 纪律里程碑绿)
 //  + 正文 + 状态行。历史流水(已平仓 trades):股票 / pnl / 守线徽章(止损·止盈·时间,
-//  守=绿 / 破=红删除线)/ note / date。空态友好占位。
+//  守=绿 / 破=红删除线)/ 净额(v1.3.0 Phase D1,nil→"—") / note / date。空态友好占位。
 //
 
 import SwiftUI
@@ -184,6 +184,10 @@ private struct ArchivedTradeRowView: View {
                 Text(row.pnl)
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundStyle(row.pnl.hasPrefix("-") ? LN.down : LN.up)
+                // v1.3.0 Phase D1:净收益金额(nil → "—";着色用派生 bool,非字符串判负)。
+                Text(LNFmt.netAmount(row.netPnlAmount))
+                    .font(.system(size: 11.5).monospacedDigit())
+                    .foregroundStyle(netPnlColor(row.netPnlAmount))
                 Text(row.date).font(.system(size: 10)).foregroundStyle(LN.textTertiary)
             }
         }

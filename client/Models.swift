@@ -66,6 +66,8 @@ struct TradeRecord: Identifiable, Codable {
     var pnl: Double          // 百分比
     var brokeRule: Bool      // 标红依据
     var note: String         // 复盘点评
+    /// v1.3.0 Phase D1:净收益金额(元,可空)。迁移前的旧行 → nil,展示"—"(区分"没数据"vs"真0元")。
+    var netPnlAmount: Double? = nil
 }
 
 // MARK: - reviews(周复盘)
@@ -83,6 +85,9 @@ struct Review: Codable {
     // 阶段3 补(设计 §4「复盘须同时读未平 positions」):未平持仓 + 空周诚实标注。
     var openHoldings: [OpenHolding] = []   // 扛过周末的套牢票(只在 positions 不在 trades)
     var sampleNote: String = ""            // 样本量提示(如"本周 0 笔闭合")
+    /// v1.3.0 Phase D1:周净额合计(元,可空)。周内无任何非空净额行 → nil(显"—");
+    /// 否则 = 该周所有非空 netPnlAmount 之和(跨迁移周部分行仍显"—",合计只 sum 非空行)。
+    var netPnlTotal: Double? = nil
 }
 
 struct WeekPoint: Identifiable, Codable { var id = UUID(); var label: String; var value: Int }
@@ -101,6 +106,8 @@ struct ReviewTrade: Identifiable, Codable {
     var pnl: String
     var tag: ReviewTag               // 肯定 / 标红
     var comment: String
+    /// v1.3.0 Phase D1:净收益金额(元,可空;旧行 nil → 展示"—")。
+    var netPnlAmount: Double? = nil
 }
 enum ReviewTag: String, Codable { case good, red }
 

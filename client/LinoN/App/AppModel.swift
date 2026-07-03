@@ -83,7 +83,7 @@ final class AppModel {
     var isLoading = false
     var loadError: String? = nil
 
-    // —— 阶段2:候选(GET /candidates;后端已按 5×free_slots 截断、满仓闭门返空)——
+    // —— 阶段2:候选(GET /candidates;v1.3.0 起后端固定返 Top CANDIDATE_LIMIT=20,不再满仓闭门)——
     var candidates: [Candidate] = []
     var candidatesTradeDate: String = ""
     var candidatesDegraded: Bool = false
@@ -123,6 +123,10 @@ final class AppModel {
     var form = EntryForm()
     var closeSellPrice = ""
     var toast: Toast? = nil
+
+    // —— v1.3.0 Phase D2:三仓相关性护栏(只在买入路径;只提示不拦)——
+    /// 命中同行业已持仓 → 非 nil,表单内显警示条;nil → 不显(无冲突/降级/请求失败静默)。
+    var correlationConflict: CorrelationResult? = nil
 
     // —— 依赖(运行期注入)——
     private let calendar: TradingCalendar
@@ -190,18 +194,13 @@ final class AppModel {
 
     var hasFreeSlot: Bool { holdings.count < 3 }
 
-    /// 空仓位数 = max(0, 3 - 持仓数)。满仓 → 0(候选闭门)。
+    /// 空仓位数 = max(0, 3 - 持仓数)。v1.3.0 起不再驱动候选闭门,仅供开仓校验类场景参考。
     var openSlots: Int { max(0, 3 - holdings.count) }
 
-    /// 满仓闭门联动(plan E1):holdings>=3 → 空;否则取后端已截断列表的前 5×空仓位。
-    /// 后端已按 free_slots 运行时截断,此处再夹一层做客户端安全带 + 满仓即时闭门。
+    /// v1.3.0 Phase C3:满仓闭门已删,固定展示 Top 20(后端已限 20,此处安全带再夹一层)。
     var shownCandidates: [Candidate] {
-        guard openSlots > 0 else { return [] }
-        return Array(candidates.prefix(5 * openSlots))
+        Array(candidates.prefix(20))
     }
-
-    /// 候选已闭门(满仓)。
-    var candidatesClosed: Bool { openSlots == 0 }
 
     func holding(byCode code: String) -> Position? {
         holdings.first(where: { $0.code == code })
@@ -231,7 +230,7 @@ final class AppModel {
             self.loadError = error.localizedDescription
         }
         isLoading = false
-        // 候选随持仓数变化(满仓闭门 / 清仓重开);后端按 free_slots 截断,持仓变化后重拉。
+        // 持仓变化后重拉候选(候选本身固定 Top 20,不再随持仓数量截断,但保持数据新鲜)。
         await loadCandidates()
     }
 
@@ -281,13 +280,19 @@ final class AppModel {
         guard sell > 0 else { showToast("请填写有效卖出价", isError: true); return }
 
         do {
-            _ = try await client.closePosition(id: pos.id, ClosePositionRequest(sell_price: sell, sell_time: nil))
+            let resp = try await client.closePosition(id: pos.id, ClosePositionRequest(sell_price: sell, sell_time: nil))
             // 清仓即录动作 → ack 停该 code 升级(无害:无升级时后端返 stopped:0)
             try? await client.ackAlert(code: code, action: "marked_close")
             dismissModal()
             await refresh()
             view = .today
-            showToast("已清仓 · 写入流水,监控已停止")
+            // v1.3.0 Phase D1:有实值净额/费用才展示打磨版 toast(旧行/异常兜底不显假数字)。
+            if let net = resp.net_pnl_amount {
+                let feeText = resp.fee.map { "(含费 ¥\(String(format: "%.2f", $0)))" } ?? ""
+                showToast("已清仓 · 净收益 \(LNFmt.signedMoney(net))\(feeText)")
+            } else {
+                showToast("已清仓 · 写入流水,监控已停止")
+            }
         } catch let e as APIError {
             showToast(e.errorDescription ?? "清仓失败", isError: true)
         } catch {
@@ -475,7 +480,10 @@ final class AppModel {
         inAnalysis = false           // 关全屏(触发 backFromAnalysis 清 thread)
         presentModalAfterCoverDismiss { [weak self] in
             self?.form = f
+            self?.correlationConflict = nil
             self?.modal = .open
+            // v1.3.0 Phase D2:深析卡买入路径预填代码后也要触发相关性护栏(同开仓 sheet 手填路径)。
+            Task { await self?.checkCorrelation(code: f.code) }
         }
     }
 
@@ -569,6 +577,7 @@ final class AppModel {
 
     func openEntry() {
         form = EntryForm()
+        correlationConflict = nil
         modal = .open
     }
 
@@ -582,6 +591,26 @@ final class AppModel {
     func dismissModal() {
         modal = nil
         closeCode = nil
+        correlationConflict = nil
+    }
+
+    // MARK: - v1.3.0 Phase D2:三仓相关性护栏
+
+    /// 代码满 6 位或输入框失焦时调一次(不逐字符打请求)。只在买入路径(开仓 sheet + 深析
+    /// 「全仓买入」预填)触发,不进候选列表。网络失败/超时/降级 → 静默清空,不显警示条、不阻塞开仓。
+    func checkCorrelation(code: String) async {
+        let bare = code.trimmingCharacters(in: .whitespaces)
+        guard bare.count >= 6, let client = clientProvider() else {
+            correlationConflict = nil
+            return
+        }
+        do {
+            let r = try await client.fetchCorrelation(code: bare)
+            correlationConflict = r.conflict ? r : nil
+        } catch {
+            // 提示性功能:请求失败/超时静默,不弹错、不阻塞开仓(与后端降级不误报对称)。
+            correlationConflict = nil
+        }
     }
 
     // MARK: - Toast
