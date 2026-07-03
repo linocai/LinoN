@@ -130,8 +130,9 @@ final class ReviewMemoryTests: XCTestCase {
 
     func testNetAmountFormattingNilShowsDash() {
         XCTAssertEqual(LNFmt.netAmount(nil), "—")
-        XCTAssertEqual(LNFmt.netAmount(1234), LNFmt.signedMoney(1234))
-        XCTAssertEqual(LNFmt.netAmount(-88), LNFmt.signedMoney(-88))
+        // 🟡2:净额到分口径(delegate signedMoneyCents,非旧整元 signedMoney)。
+        XCTAssertEqual(LNFmt.netAmount(1234), LNFmt.signedMoneyCents(1234))
+        XCTAssertEqual(LNFmt.netAmount(-88), LNFmt.signedMoneyCents(-88))
     }
 
     // —— v1.3.0 Phase D1:netPnlColor 派生 bool 着色(nil→中性灰,非字符串判负)——
@@ -171,5 +172,35 @@ final class ReviewMemoryTests: XCTestCase {
         XCTAssertEqual(p.netPnlTotal, 356.78)
         XCTAssertEqual(p.trades[0].netPnlAmount, 823.5)
         XCTAssertNil(p.trades[1].netPnlAmount)   // 旧行/无数据行 → null 原样解出 nil,不 500/不崩
+    }
+}
+
+// MARK: - v1.3.0 审后修复:URL 构造门禁(致命#1)+ 净额分位(🟡2)
+
+final class APIClientURLTests: XCTestCase {
+    /// 致命#1 回归:带 query 的路径,"?" 必须保留、绝不能被编码成 %3F(否则真后端 404)。
+    func testMakeURLPreservesQueryString() {
+        let base = URL(string: "http://127.0.0.1:8001")!
+        let corr = APIClient.makeURL(base: base, path: "/api/v1/positions/correlation?code=600519")
+        XCTAssertEqual(corr?.absoluteString, "http://127.0.0.1:8001/api/v1/positions/correlation?code=600519")
+        XCTAssertFalse(corr?.absoluteString.contains("%3F") ?? true)   // ? 不能被编码
+        // 🟡1 同族:review?week= 同样保留
+        let rev = APIClient.makeURL(base: base, path: "/api/v1/review?week=2026-W27")
+        XCTAssertEqual(rev?.absoluteString, "http://127.0.0.1:8001/api/v1/review?week=2026-W27")
+        // 纯路径端点不回归
+        let plain = APIClient.makeURL(base: base, path: "/api/v1/positions")
+        XCTAssertEqual(plain?.absoluteString, "http://127.0.0.1:8001/api/v1/positions")
+        // prod https 基址同样正确
+        let prod = APIClient.makeURL(base: URL(string: "https://ln.linotsai.top")!,
+                                     path: "/api/v1/positions/correlation?code=000858")
+        XCTAssertEqual(prod?.absoluteString, "https://ln.linotsai.top/api/v1/positions/correlation?code=000858")
+    }
+
+    /// 🟡2:净额展示到分(Phase B 逐分对账口径);nil→"—"(区分"没数据"vs"真0元")。
+    func testNetAmountFormatting() {
+        XCTAssertEqual(LNFmt.netAmount(nil), "—")
+        XCTAssertEqual(LNFmt.netAmount(583.45), "+¥583.45")
+        XCTAssertEqual(LNFmt.netAmount(-615.93), "−¥615.93")   // 负用 Unicode 减号,着色另派生
+        XCTAssertEqual(LNFmt.netAmount(0.0), "+¥0.00")         // 真0 → ¥0.00,区别于 nil 的"—"
     }
 }

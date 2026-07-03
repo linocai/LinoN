@@ -170,7 +170,8 @@ def fetch_market_snapshot(trade_date_yyyymmdd: str) -> MarketSnapshot:
     import pandas as pd
 
     disp = _fmt_date(trade_date_yyyymmdd)
-    load_industry_map()   # 确保行业映射在位(无 token 则空,不崩)
+    load_industry_map(force=True)   # 候选刷新时强制重拉行业映射(每日一次,不打限频):
+    # 让"候选刷新自然回填"对首次加载失败(_INDUSTRY_LOADED 粘死空)也成立,相关性护栏自愈(v1.3.0 reviewer 🔵1)
 
     db = tc.ts_daily_basic_all(trade_date_yyyymmdd)
     if not db.ok or db.data is None:

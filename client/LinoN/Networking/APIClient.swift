@@ -494,9 +494,20 @@ actor APIClient {
 
     // MARK: - 传输层
 
+    /// 由 base + path(可含 "?query")构造 URL。**禁止 appendingPathComponent**——它把整个
+    /// path(含 "?code=...")当单个路径组件、"?" 编码成 %3F,带 query 的端点(correlation /
+    /// review?week=)真后端恒 404(v1.3.0 reviewer 致命 #1)。用 URL(string:relativeTo:) 让
+    /// "?" 正确解析为 query 分隔符。可单测(testMakeURLPreservesQueryString)。
+    static func makeURL(base: URL, path: String) -> URL? {
+        URL(string: path, relativeTo: base)?.absoluteURL
+    }
+
     private func get(_ path: String) async throws -> Data {
         try ensureToken()
-        var req = URLRequest(url: baseURL.appendingPathComponent(path))
+        guard let url = Self.makeURL(base: baseURL, path: path) else {
+            throw APIError.transport("无效 URL: \(path)")
+        }
+        var req = URLRequest(url: url)
         req.httpMethod = "GET"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.timeoutInterval = 12
@@ -505,7 +516,10 @@ actor APIClient {
 
     private func post<B: Encodable>(_ path: String, body: B, timeout: TimeInterval = 12) async throws -> Data {
         try ensureToken()
-        var req = URLRequest(url: baseURL.appendingPathComponent(path))
+        guard let url = Self.makeURL(base: baseURL, path: path) else {
+            throw APIError.transport("无效 URL: \(path)")
+        }
+        var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

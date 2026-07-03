@@ -38,11 +38,21 @@ enum LNFmt {
         return (v >= 0 ? "+¥" : "−¥") + body
     }
 
+    /// v1.3.0 Phase D1:净额到分(带 +¥/−¥;与 Phase B 逐分对账口径一致,区别于 signedMoney 整元)。
+    static func signedMoneyCents(_ v: Double) -> String {
+        let nf = NumberFormatter()
+        nf.numberStyle = .decimal
+        nf.minimumFractionDigits = 2
+        nf.maximumFractionDigits = 2
+        let body = nf.string(from: NSNumber(value: Swift.abs(v))) ?? "0.00"
+        return (v >= 0 ? "+¥" : "−¥") + body
+    }
+
     /// v1.3.0 Phase D1:可空净额展示。nil(旧行/无数据)→ "—"(区分"没数据"vs"真0元");
-    /// 有值 → signedMoney。调用方对颜色需另用 `netPnlColor(_:)` 派生(不解析这里的字符串)。
+    /// 有值 → 到分金额(🟡2:Phase B 逐分对账,展示到分)。颜色另用 `netPnlColor(_:)` 派生,不解析字符串。
     static func netAmount(_ v: Double?) -> String {
         guard let v else { return "—" }
-        return signedMoney(v)
+        return signedMoneyCents(v)
     }
 }
 

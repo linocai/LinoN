@@ -289,7 +289,7 @@ final class AppModel {
             // v1.3.0 Phase D1:有实值净额/费用才展示打磨版 toast(旧行/异常兜底不显假数字)。
             if let net = resp.net_pnl_amount {
                 let feeText = resp.fee.map { "(含费 ¥\(String(format: "%.2f", $0)))" } ?? ""
-                showToast("已清仓 · 净收益 \(LNFmt.signedMoney(net))\(feeText)")
+                showToast("已清仓 · 净收益 \(LNFmt.signedMoneyCents(net))\(feeText)")
             } else {
                 showToast("已清仓 · 写入流水,监控已停止")
             }
