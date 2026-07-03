@@ -1,12 +1,15 @@
 """钉死的选股规则(单一事实源,plan §4.1)。
 
 铁律(plan §4 / 任务书):技术面/选股不定死阈值,交给 LLM 判;这里**只硬编真二元项**
-(黑名单代码段/ST/白酒行业、高位线 ≥100% 排除·≥50% 警告降级、截断 5×free_slots、
-排序放量权重最大首版 0.4/0.25/0.2/0.15);粗筛宽条件(主力净流入为正、放量倍数、
-创 N 日新高/站均线)给"宁松勿紧"经验默认值,**注释标"可复盘迭代、不卡生死"**,不当死阈值。
+(黑名单代码段/ST/白酒行业、高位线 ≥100% 排除·≥50% 警告降级、候选固定 CANDIDATE_LIMIT=20
+(v1.3.0 起,已删满仓闭门)、排序放量权重最大首版 0.4/0.25/0.2/0.15);粗筛宽条件(主力净流入
+为正、放量倍数、创 N 日新高/站均线)给"宁松勿紧"经验默认值,**注释标"可复盘迭代、不卡生死"**,
+不当死阈值。
 
 止损/止盈/D4/容差带常量仍只在 app.db.store 顶部,本模块需要时 import 复用,**禁止再写一份**。
-(本选股层不直接用那几个常量,但保留这条纪律说明,提醒后续 builder 别在此另起常量。)
+MAX_HOLDINGS 单一事实源 = `app.db.store.constants.MAX_HOLDINGS`(v1.3.0 C1:本模块曾定义
+一份同名常量供已删的 free_slots()/truncation_limit() 用,现两函数随满仓闭门一并删除,
+本模块不再需要 MAX_HOLDINGS,不重复定义、不重复 import——双定义漂移已消)。
 """
 
 from __future__ import annotations
@@ -81,20 +84,10 @@ def high_warn_text(pct_60d: Optional[float]) -> Optional[str]:
     return None
 
 
-# —— 截断公式(二元,plan §4.1)————————————————————————————————————
-# limit = 5 × free_slots;free_slots = max(0, 3 - holding_count);满仓 → 0(闭门)。
-SLOTS_PER_CANDIDATE = 5
-MAX_HOLDINGS = 3              # 与 store.MAX_HOLDINGS 一致(画像:同时最多 3 票)
-
-
-def free_slots(holding_count: int) -> int:
-    """空仓位 = max(0, 3 - 在持票数)。"""
-    return max(0, MAX_HOLDINGS - max(0, int(holding_count)))
-
-
-def truncation_limit(holding_count: int) -> int:
-    """候选截断上限 = 5 × free_slots;满仓 → 0(闭门)。"""
-    return SLOTS_PER_CANDIDATE * free_slots(holding_count)
+# —— 候选条数上限(v1.3.0 C1,单一事实源)———————————————————————————————
+# 固定 Top 20,任何持仓状态都不闭门(旧"5×free_slots 满仓闭门"截断公式已删,
+# CANDIDATE_LIMIT 是唯一事实源,GET /candidates 端点 import 此常量,不散落硬编 20)。
+CANDIDATE_LIMIT = 20
 
 
 # —— 粗筛宽条件(经验默认值,非生死阈,可复盘迭代,不卡死生死)——————————————

@@ -79,8 +79,9 @@ def _sector_of(sr: StockRow) -> str:
 def build_candidates(snapshot: MarketSnapshot) -> List[Dict[str, Any]]:
     """对快照执行 黑名单 → 高位线 → 粗筛 → 排序(全量),产候选 dict 列表(未截断)。
 
-    截断在端点运行时按 free_slots 做(plan D2);这里产**已排序的全部合格候选**
-    并打 rank(1 起),端点再 prefix(5×free_slots)。
+    截断在端点运行时做(v1.3.0 起固定 rules.CANDIDATE_LIMIT=20,不再随 free_slots
+    变化、不再满仓闭门);这里产**已排序的全部合格候选**并打 rank(1 起),端点再
+    prefix(rules.CANDIDATE_LIMIT)。
     """
     survivors: List[StockRow] = []
     for sr in snapshot.rows:

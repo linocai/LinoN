@@ -64,13 +64,23 @@ def test_high_warn_text():
     assert rules.high_warn_text(None) is None
 
 
-# —— rules:截断公式(随 free_slots:3→15、1→5、0→0)——————————————————
+# —— rules:候选条数上限(v1.3.0 C1/C4:固定 20,不再随 free_slots/满仓变化)———————
 
-def test_truncation_limit():
-    assert rules.free_slots(0) == 3 and rules.truncation_limit(0) == 15
-    assert rules.free_slots(2) == 1 and rules.truncation_limit(2) == 5
-    assert rules.free_slots(3) == 0 and rules.truncation_limit(3) == 0   # 满仓闭门
-    assert rules.free_slots(5) == 0 and rules.truncation_limit(5) == 0   # 兜底不越界
+def test_candidate_limit_is_fixed_20():
+    """CANDIDATE_LIMIT 单一源 = 20,不随持仓状态变化(旧 5×free_slots 截断公式已删)。"""
+    assert rules.CANDIDATE_LIMIT == 20
+
+
+def test_rules_has_no_stale_truncation_helpers():
+    """旧满仓闭门辅助(free_slots/truncation_limit/SLOTS_PER_CANDIDATE)已删净,不留死码。"""
+    assert not hasattr(rules, "free_slots")
+    assert not hasattr(rules, "truncation_limit")
+    assert not hasattr(rules, "SLOTS_PER_CANDIDATE")
+
+
+def test_rules_max_holdings_not_redefined():
+    """rules 模块不再重复定义 MAX_HOLDINGS(单一源收敛到 app.db.store.constants)。"""
+    assert not hasattr(rules, "MAX_HOLDINGS")
 
 
 # —— rules:排序加权(放量权重最大)————————————————————————————————

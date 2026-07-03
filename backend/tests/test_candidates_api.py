@@ -1,7 +1,8 @@
 """阶段2 D2:候选端点(GET /candidates + POST /candidates/refresh)单测。
 
 不联网:_pipeline_fn 注入假流水线返回固定 rows;DB 临时;token 临时。
-验证截断随 free_slots(满仓闭门)、无缓存 degraded、refresh 落表。
+验证固定返回 Top rules.CANDIDATE_LIMIT=20(v1.3.0 C 起不再随 free_slots 截断/满仓闭门)、
+无缓存 degraded、refresh 落表。
 """
 
 import importlib
@@ -94,8 +95,8 @@ def test_candidates_no_tushare_token(client, monkeypatch):
     assert b["degraded"] is True and b["reason"] == "no_tushare_token"
 
 
-# —— refresh 落表 + GET 读缓存按 5×free_slots 截断(空仓 3 → 15)——
-def test_refresh_then_get_truncates_15(client):
+# —— refresh 落表 + GET 读缓存固定返回 Top 20(v1.3.0 C2/C4,不再随 free_slots)——
+def test_refresh_then_get_returns_fixed_20(client):
     c, _ = client
     rr = c.post("/api/v1/candidates/refresh", headers=AUTH)
     assert rr.status_code == 200
@@ -106,7 +107,7 @@ def test_refresh_then_get_truncates_15(client):
     g = c.get("/api/v1/candidates", headers=AUTH).json()
     assert g["degraded"] is False and g["trade_date"] == "2026-05-06"
     assert g["free_slots"] == 3
-    assert len(g["candidates"]) == 15        # 5×3 截断
+    assert len(g["candidates"]) == 20        # 固定 20(rules.CANDIDATE_LIMIT),不再截断
     # 形状对齐 Candidate(camelCase);阶段3.1 键集合 = 阶段2 键集合 + score(精确断言)。
     c0 = g["candidates"][0]
     for k in ("rank", "name", "code", "sector", "tag", "price", "chg",
@@ -119,8 +120,8 @@ def test_refresh_then_get_truncates_15(client):
     assert c0["score"] == 100                # rank=1 → score=100(_fake_rows)
 
 
-# —— 截断随 free_slots:开 2 仓 → free=1 → 取 5 ——
-def test_truncation_follows_free_slots(client):
+# —— 候选条数不随持仓变化:开 2 仓仍返 20 ——
+def test_candidate_count_unaffected_by_holdings(client):
     c, _ = client
     c.post("/api/v1/candidates/refresh", headers=AUTH)
     for i in range(2):
@@ -128,12 +129,12 @@ def test_truncation_follows_free_slots(client):
             "code": f"60010{i}", "buy_price": 10.0, "qty": 100, "entry_reason": "x",
         }, headers=AUTH)
     g = c.get("/api/v1/candidates", headers=AUTH).json()
-    assert g["free_slots"] == 1
-    assert len(g["candidates"]) == 5         # 5×1
+    assert g["free_slots"] == 1              # free_slots 字段仍返回(供其他用途)
+    assert len(g["candidates"]) == 20        # 但候选条数不再随之截断
 
 
-# —— 满仓闭门:开 3 仓 → free=0 → 空列表 ——
-def test_full_holdings_closes_door(client):
+# —— 满仓仍返 20、无闭门(v1.3.0 C 验收①,已删满仓闭门)——
+def test_full_holdings_still_returns_20_no_closed_door(client):
     c, _ = client
     c.post("/api/v1/candidates/refresh", headers=AUTH)
     for i in range(3):
@@ -142,9 +143,21 @@ def test_full_holdings_closes_door(client):
         }, headers=AUTH)
     g = c.get("/api/v1/candidates", headers=AUTH).json()
     assert g["free_slots"] == 0
-    assert g["candidates"] == []             # 闭门(缓存仍在,运行时截断为 0)
-    # 但缓存表仍有 20 条(端点只是运行时截断)
+    assert len(g["candidates"]) == 20         # 满仓不再闭门,仍返 Top 20
     assert len(store.list_candidates("2026-05-06")) == 20
+
+
+# —— 候选池不足 20 条时,原样返回不足数(不报错、不补空)——
+def test_fewer_than_20_candidates_returns_all(client, monkeypatch):
+    c, app_mod = client
+    monkeypatch.setattr(
+        app_mod, "_pipeline_fn",
+        lambda basis: (_fake_rows(7), False, "ok", "2026-05-06"),
+        raising=False,
+    )
+    c.post("/api/v1/candidates/refresh", headers=AUTH)
+    g = c.get("/api/v1/candidates", headers=AUTH).json()
+    assert len(g["candidates"]) == 7
 
 
 # —— refresh degraded(pipeline 失败)→ degraded:true count=0 ——

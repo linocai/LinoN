@@ -44,12 +44,16 @@ def open_position(
     entry_reason: str,
     buy_date: str,
     entry_snapshot: Optional[Dict[str, Any]] = None,
+    industry: str = "",
     db_path: Optional[str] = None,
 ) -> int:
     """开一仓,写 positions(status='holding')。返回新 position id。
 
     entry_snapshot 形如 {'formNote': ..., 'fundNote': ...}(系统自动补,存 JSON)。
     持仓上限校验:已 >= 3 holding 时抛 ValueError(同时最多 3 票)。
+    industry(v1.3.0 Phase A1,相关性护栏用):调用方只应传"已缓存"的行业口径
+    (app.py._resolve_industry 只读 fetch.industry_of,绝不在此触发同步联网拉取);
+    查不到/未传 → 空串,不阻塞开仓。
     """
     conn = get_connection(db_path)
     try:
@@ -62,9 +66,10 @@ def open_position(
         cur = conn.execute(
             """INSERT INTO positions
                (code, name, buy_price, qty, entry_reason, entry_snapshot,
-                buy_date, status, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'holding', ?)""",
-            (code, name, buy_price, qty, entry_reason, snap_json, buy_date, _now()),
+                buy_date, status, created_at, industry)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'holding', ?, ?)""",
+            (code, name, buy_price, qty, entry_reason, snap_json, buy_date, _now(),
+             industry or ""),
         )
         conn.commit()
         return int(cur.lastrowid)

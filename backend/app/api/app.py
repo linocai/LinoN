@@ -40,6 +40,7 @@ from app.calendar.trading_calendar import (
 from app.config import settings
 from app.db import store
 from app.monitor.escalation import EscalationManager
+from app.screen import rules
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,10 @@ async def lifespan(app: FastAPI):
     rebuilt = rebuild_time_escalations(app.state.escalation, now=_dt.now())
     if rebuilt:
         logger.info("启动重建逾期 time 升级 %d 条(D4+ 持仓)", rebuilt)
+    # 行业映射预热:plan §4 A1 允许"lifespan 启动 和/或 GET /positions/correlation
+    # 端点承担"(二选一/都做)。本期只留 correlation 端点按需预热——lifespan 每次
+    # TestClient 启动都会跑,本地/CI 若 .env 配了真 TUSHARE_TOKEN 会让全量单测套件
+    # 意外联网(违反"不联网"测试纪律、拖慢/可能限频),故不在此处调用。
     app.state._stop_event = asyncio.Event()
     app.state._monitor_task = None
     if ENABLE_MONITOR:
@@ -145,11 +150,13 @@ def open_position(body: PositionOpen):
         "fundNote": "资金快照:阶段2 接 Tushare 补",
     }
 
+    industry = _resolve_industry(body.code)   # v1.3.0 A1:只读缓存,绝不同步联网
+
     try:
         pid = store.open_position(
             code=body.code, name=name, buy_price=body.buy_price, qty=body.qty,
             entry_reason=body.entry_reason, buy_date=buy_date,
-            entry_snapshot=entry_snapshot,
+            entry_snapshot=entry_snapshot, industry=industry,
         )
     except ValueError:
         # 并发兜底:open_position 内部满仓 ValueError
@@ -234,6 +241,68 @@ def list_positions() -> PositionsList:
     return PositionsList(holdings=out, free_slots=free)
 
 
+# —— v1.3.0 A2:三仓相关性护栏(只提示不拦,只在买入路径查询)——————————————————
+
+def compute_correlation(
+    target_industry: str,
+    holdings: list,
+    exclude_code: str = "",
+) -> dict:
+    """相关性判定纯函数(plan §4 Phase A2 🔵1,4 态)。可注入单测,端点只装配。
+
+    · 待买行业为空/None → 直接 conflict:false(无凭据不误报)。
+    · 比对时跳过 industry 为 NULL/空串的持仓行(防"空串==空串"误命中)。
+    · 排除与待买同 code 的持仓行(免"与自己同主线"怪文案)。
+    · 命中任一(非空且相等且不同 code)已持仓行业 → conflict:true + 明细;否则 false。
+    """
+    target = (target_industry or "").strip()
+    if not target:
+        return {"conflict": False, "industry": "", "conflict_with": []}
+
+    hits = []
+    for h in holdings:
+        code = h.get("code", "")
+        if exclude_code and code == exclude_code:
+            continue
+        ind = (h.get("industry") or "").strip()
+        if not ind:
+            continue
+        if ind == target:
+            hits.append({"code": code, "name": h.get("name", ""), "industry": ind})
+
+    return {
+        "conflict": bool(hits),
+        "industry": target,
+        "conflict_with": hits,
+    }
+
+
+@app.get(f"{API_PREFIX}/positions/correlation", dependencies=[Depends(require_token)])
+def positions_correlation(code: str = "") -> dict:
+    """待买 code 与当前持仓的行业相关性提示(只读、提示性,慢/失败无害恒 200)。
+
+    此端点(与开仓路径不同)允许按需 load_industry_map() 预热/兜底拉取——提示性功能,
+    慢/失败都不阻断任何录入动作。降级(无行业数据/无持仓)恒返 conflict:false。
+    """
+    bare = _bare_code(code)
+    target_industry = ""
+    try:
+        from app.screen.fetch import industry_of, load_industry_map
+        load_industry_map()
+        target_industry = industry_of(bare) or ""
+    except Exception:
+        logger.warning("相关性查询拉行业映射异常(降级 conflict:false)", exc_info=True)
+
+    holdings = store.list_holdings()
+    result = compute_correlation(target_industry, holdings, exclude_code=bare)
+    return {
+        "ok": True,
+        "conflict": result["conflict"],
+        "industry": result["industry"],
+        "conflictWith": result["conflict_with"],
+    }
+
+
 # —— A.4 硬线 ack ————————————————————————————————————————————————————
 
 @app.post(f"{API_PREFIX}/alerts/{{code}}/ack", dependencies=[Depends(require_token)])
@@ -243,13 +312,15 @@ def ack_alert(code: str, body: AlertAck) -> dict:
     return {"ok": True, "stopped": n}
 
 
-# —— D2 候选列表(读缓存 + 运行时按 free_slots 截断)——————————————————————
+# —— D2 候选列表(读缓存,固定 CANDIDATE_LIMIT=20,v1.3.0 C2 已删满仓闭门)————————
 
 @app.get(f"{API_PREFIX}/candidates", dependencies=[Depends(require_token)])
 def list_candidates() -> CandidatesList:
-    """读 candidates 缓存表最新 trade_date,按 5×free_slots 运行时再截断。
+    """读 candidates 缓存表最新 trade_date,固定返回 Top rules.CANDIDATE_LIMIT(20)。
 
-    满仓(free_slots=0)→ 空列表(闭门);无缓存/无 token → degraded:true 空列表。
+    任何持仓状态(含满仓)都不再闭门(v1.3.0 删满仓闭门,单一源 rules.CANDIDATE_LIMIT);
+    响应仍带 free_slots(供客户端开仓校验等其他用途,只是不再用它截断候选条数)。
+    无缓存/无 token → degraded:true 空列表(不变)。
     candidates 形状对齐 Models.swift Candidate(analysis 在列表里省略,深判 on-demand)。
     """
     free = max(0, store.MAX_HOLDINGS - store.holding_count())
@@ -261,8 +332,7 @@ def list_candidates() -> CandidatesList:
             candidates=[], free_slots=free, trade_date="", degraded=True, reason=reason,
         )
     all_rows = store.list_candidates(td)
-    limit = 5 * free   # 截断公式(满仓 0 闭门)
-    shown = all_rows[:limit] if limit > 0 else []
+    shown = all_rows[:rules.CANDIDATE_LIMIT]
     return CandidatesList(
         candidates=shown, free_slots=free, trade_date=td, degraded=False,
     )
@@ -699,6 +769,21 @@ def _resolve_name(code: str) -> str:
         from app.data.realtime import get_realtime_quote
         q = get_realtime_quote(code)
         return q.name if q is not None else ""
+    except Exception:
+        return ""
+
+
+def _resolve_industry(code: str) -> str:
+    """开仓路径专用:只读已缓存的行业映射,绝不触发同步全市场拉取(v1.3.0 A1 🟡2)。
+
+    与 _resolve_candidate_meta 里"缺则 load_industry_map()"的 fallback 联网**刻意不带**——
+    开仓是关键单点故障,冷缓存时 load_industry_map() 同步拉全市场会拖过客户端 12s 超时,
+    导致"客户端报错但后端已开仓"→ 用户重试 → 幽灵持仓。冷缓存/查不到 → 空串,不阻塞开仓。
+    缓存预热改由 lifespan 启动 和/或 GET /positions/correlation 端点承担。
+    """
+    try:
+        from app.screen.fetch import industry_of
+        return industry_of(code) or ""
     except Exception:
         return ""
 
