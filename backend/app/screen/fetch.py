@@ -29,7 +29,7 @@ import logging
 import re
 import threading
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.calendar.trading_calendar import prev_trading_day
 from app.data import tushare_client as tc
@@ -185,12 +185,18 @@ def _recent_trade_dates(latest_yyyymmdd: str, n: int) -> List[str]:
     return out
 
 
-def fetch_market_snapshot(trade_date_yyyymmdd: str) -> MarketSnapshot:
+def fetch_market_snapshot(
+    trade_date_yyyymmdd: str, cfg: Optional[Dict[str, Any]] = None
+) -> MarketSnapshot:
     """拉全市场当日 daily_basic + moneyflow + 近 N 日 daily,归一为 MarketSnapshot。
 
     trade_date_yyyymmdd:EOD 基准交易日 'YYYYMMDD'。
     无 token/核心接口失败 → MarketSnapshot.fail(不崩)。
     daily 近 N 日缺日子 → 用已有日子算,缺太多则相应指标退化(pct_60d=None 等)。
+
+    v1.3.1 Phase B:cfg(resolve 后全量活配置)可选传入,穿参给 _enrich_form → compute_form
+    (影响 pos_health/breakout_ok/had_limit_up 的阈值);缺省 None → 回落 rules 默认常量,
+    行为与改前逐字节一致(保批1测试/旧调用不回归)。
     """
     import pandas as pd
 
@@ -292,7 +298,7 @@ def fetch_market_snapshot(trade_date_yyyymmdd: str) -> MarketSnapshot:
             volume_ratio=volume_ratio,
         )
         # 近 N 日形态(从 daily_by_date 取本票历史序列,新→旧;复权用 adj_by_date)
-        _enrich_form(sr, code, dates, daily_by_date, latest, adj_by_date)
+        _enrich_form(sr, code, dates, daily_by_date, latest, adj_by_date, cfg=cfg)
         rows.append(sr)
 
     return MarketSnapshot(trade_date=disp, rows=rows, ok=True, reason="ok")
@@ -305,13 +311,18 @@ def _enrich_form(
     daily_by_date: Dict[str, Dict[str, dict]],
     latest: str,
     adj_by_date: Optional[Dict[str, Dict[str, float]]] = None,
+    cfg: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """薄封装(签名不变,test_screen.py 有测试直接调它断言字段)。
+    """薄封装(前 5 参签名不变,test_screen.py 有测试直接调它断言字段)。
 
     内部改为:取本票 close/vol/adj 历史序列(新→旧)→ qfq_closes 复权 → compute_form
     统一算放量倍数/创20日新高/站20日均线/60日涨幅/当日涨跌幅,写回 sr。
     adj_by_date 缺省(None,如旧测试直调 5 参)→ 视为无复权数据,退化为原始价
     (等价旧行为,不崩)。dates 新→旧;daily_by_date[date][code] = {'close','vol','pre_close'}。
+
+    v1.3.1 Phase B:新增可选尾参 cfg(resolve 后全量活配置),原样穿给 compute_form
+    (影响 pos_health 相关阈值不变、breakout_ok/had_limit_up 用到的阈值);缺省 None →
+    compute_form 内部回落 rules 默认常量,行为与改前逐字节一致。
     """
     adj_by_date = adj_by_date or {}
     # 本票历史序列(新→旧),只取有该 code 数据的交易日;同步取该日 adj_factor(缺则 None)。
@@ -337,7 +348,7 @@ def _enrich_form(
     # (NaN 安全读取,见 _safe_float);旧测试直调 _enrich_form(不经 fetch_market_snapshot)
     # 时 sr.volume_ratio 缺省 0.0(StockRow 默认值)→ compute_form 内 breakout 条③恒不满足,
     # 不崩、保守 False。
-    result = compute_form(closes, vols, amounts, volume_ratio=sr.volume_ratio)
+    result = compute_form(closes, vols, amounts, volume_ratio=sr.volume_ratio, cfg=cfg)
 
     sr.pct_chg = result.pct_chg
     sr.vol_multiple = result.vol_multiple

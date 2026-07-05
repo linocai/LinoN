@@ -152,3 +152,14 @@ class MemoryOut(BaseModel):
     """GET /memory 响应(plan §4.3)。items = memory 条目;closedTrades = 已平仓 trades 流水。"""
     items: List[Dict[str, Any]]           # [{kind, content, date}]
     closedTrades: List[Dict[str, Any]]    # [{name, code, pnl, netPnlAmount(可空), keptStop, keptTake, keptTime, brokeRule, note, date}]
+
+
+# —— v1.3.1 Phase B2:选股配置可调化 ——————————————————————————————————————
+
+class ScreenConfigIn(BaseModel):
+    """PUT /api/v1/screen/config 请求体(plan §4 Phase B2)。
+
+    config 是扁平单层键值 dict(部分/全部键,越界值由后端逐键夹紧,不 422)。
+    空 dict `{}` = 恢复默认(清用户行)。未知键后端忽略。
+    """
+    config: Dict[str, Any] = Field(default_factory=dict)

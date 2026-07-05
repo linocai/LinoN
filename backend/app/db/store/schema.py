@@ -4,6 +4,10 @@ DDL 是后端 schema 权威。客户端 Models.swift 上 TradeRecord 多 name/no
 由 `_ensure_trades_columns` 迁移补充(阶段3);candidates.score 由 `_ensure_candidates_columns`
 补充(阶段3.1)。两处迁移整段 try/except 只 log 不 re-raise——init_db 跑在 app.py lifespan
 启动路径、每次 ECS 重启都执行,展示列迁移绝不能拖垮整个交易监控服务的 startup。
+
+`screen_config` 表(v1.3.1 Phase B1)是 **新建表**(`CREATE TABLE IF NOT EXISTS`)非
+ALTER 迁移——风险低于上述真 migration,随 `_SCHEMA` executescript 幂等建表,不需要
+`_ensure_*_columns` 姿势的 PRAGMA 探测/ALTER。
 """
 
 from __future__ import annotations
@@ -118,6 +122,14 @@ CREATE TABLE IF NOT EXISTS analysis_verdicts (
     verdict      TEXT    NOT NULL,    -- 最近一次候选深判 verdict(可进/观望/不进)
     created_at   TEXT    NOT NULL,
     UNIQUE(trade_date, code)          -- ON CONFLICT DO UPDATE 覆盖为最新一次深判(非保留最早)
+);
+
+CREATE TABLE IF NOT EXISTS screen_config (
+    id           INTEGER PRIMARY KEY CHECK(id=1),   -- 单行表(id 恒 1,upsert 目标)
+    config_json  TEXT    NOT NULL,   -- 用户增量配置 JSON(只存显式提交的键,非全量;v1.3.1 Phase B1)
+    updated_at   TEXT    NOT NULL
+    -- CREATE TABLE IF NOT EXISTS 非 ALTER:新表建表不是列迁移,风险低于真 migration,
+    -- 随 _SCHEMA executescript 幂等建表(不需要 _ensure_*_columns 迁移函数)。
 );
 """
 

@@ -36,10 +36,10 @@ def _tables(db_path):
 
 def test_init_creates_tables(db):
     # 阶段0 四表 + 阶段1 A.1 device_tokens + 阶段2 D1 candidates
-    # + 阶段2.5 F3 candidate_outcomes/analysis_verdicts
+    # + 阶段2.5 F3 candidate_outcomes/analysis_verdicts + v1.3.1 Phase B1 screen_config
     assert _tables(db) == [
         "analysis_verdicts", "candidate_outcomes", "candidates", "device_tokens",
-        "memory", "positions", "reviews", "trades",
+        "memory", "positions", "reviews", "screen_config", "trades",
     ]
 
 

@@ -68,6 +68,7 @@ def compute_form(
     vols_new_to_old: List[float],
     amounts_new_to_old: Optional[List[float]] = None,
     volume_ratio: Optional[float] = None,
+    cfg: Optional[dict] = None,
 ) -> FormResult:
     """从近 N 日【已复权】收盘价序列 + 原始成交量序列(均新→旧)算形态。
 
@@ -104,7 +105,28 @@ def compute_form(
         突破自己掐灭);故振幅与突破都在 closes[1:25](过去24日,不含今日)上算。
         volume_ratio 缺失(None,向后兼容旧调用点)→ 条③视为不满足 → breakout_ok=False。
         数据不足 25 日(closes[1:25] 拿不满)→ False。
+
+    v1.3.1 Phase B(plan §4 Phase B2,新增可选入参 cfg):had_limit_up/breakout_ok 用到的
+    ACTIVE_LOOKBACK_DAYS/LIMIT_UP_PCT/BREAKOUT_RANGE_MAX/BREAKOUT_VOL_RATIO_MIN 改从
+    cfg 读(缺省 None → 回落 rules.DEFAULT_SCREEN_CONFIG,行为与改前逐字节一致,保批1
+    测试/旧调用点[analyze.py 的 3 参调用]不回归)。**深判层 analyze.py 不传 cfg**——
+    继续吃 rules 默认常量,不读用户配置(plan §4 Phase B2 深判层边界,钉死)。
     """
+    # cfg 缺省(None,批1旧调用点/深判层 analyze.py)→ 直接回落【模块级常量】(不是
+    # DEFAULT_SCREEN_CONFIG 快照 dict)——旧测试对 rules.ACTIVE_LOOKBACK_DAYS 等常量的
+    # monkeypatch 仍需生效(test_form.py test_had_limit_up_respects_lookback_window),
+    # 若回落一份"构造时快照"的 dict,monkeypatch 常量不会反映到该 dict 里,会假性回归。
+    if cfg is not None:
+        active_lookback_days = int(cfg.get("active_lookback_days", rules.ACTIVE_LOOKBACK_DAYS))
+        limit_up_pct = cfg.get("limit_up_pct", rules.LIMIT_UP_PCT)
+        breakout_range_max = cfg.get("breakout_range_max", rules.BREAKOUT_RANGE_MAX)
+        breakout_vol_ratio_min = cfg.get("breakout_vol_ratio_min", rules.BREAKOUT_VOL_RATIO_MIN)
+    else:
+        active_lookback_days = rules.ACTIVE_LOOKBACK_DAYS
+        limit_up_pct = rules.LIMIT_UP_PCT
+        breakout_range_max = rules.BREAKOUT_RANGE_MAX
+        breakout_vol_ratio_min = rules.BREAKOUT_VOL_RATIO_MIN
+
     result = FormResult()
     if not closes_new_to_old:
         return result
@@ -156,7 +178,7 @@ def compute_form(
     # pct[i] = (closes[i]-closes[i+1])/closes[i+1];窗口 = pct[1 : 1+N](排除今日 index0,
     # 上界 1+N 不含端点 → i 取 1..N;每个 i 需 closes[i+1] 存在,即 i+1 <= n_close-1)。
     n_close = len(closes_new_to_old)
-    lookback_end = 1 + rules.ACTIVE_LOOKBACK_DAYS  # slice 上界(不含),i ∈ [1, lookback_end)
+    lookback_end = 1 + active_lookback_days  # slice 上界(不含),i ∈ [1, lookback_end)
     for i in range(1, lookback_end):
         if i + 1 > n_close - 1:      # closes[i+1] 不存在 → 数据不足,停
             break
@@ -164,7 +186,7 @@ def compute_form(
         if prev <= 0:
             continue
         pct = (closes_new_to_old[i] - prev) / prev * 100.0
-        if pct >= rules.LIMIT_UP_PCT:
+        if pct >= limit_up_pct:
             result.had_limit_up = True
             break
 
@@ -183,9 +205,9 @@ def compute_form(
         lo24, hi24 = min(window24), max(window24)
         if lo24 > 0:
             range_pct = (hi24 - lo24) / lo24
-            narrow = range_pct < rules.BREAKOUT_RANGE_MAX
+            narrow = range_pct < breakout_range_max
             breaks_out = today_close > hi24
-            vol_ok = volume_ratio >= rules.BREAKOUT_VOL_RATIO_MIN
+            vol_ok = volume_ratio >= breakout_vol_ratio_min
             result.breakout_ok = narrow and breaks_out and vol_ok
 
     return result

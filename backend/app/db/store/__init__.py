@@ -12,6 +12,7 @@
   device_tokens APNs device token 注册
   candidates    候选缓存表 upsert/list
   outcomes      回测 candidate_outcomes / analysis_verdicts + 待回填扫描
+  screen_config 选股配置单行表 get/put(v1.3.1 Phase B1,用户增量,默认值单一源在 rules.py)
 
 注:plan DDL 是后端 schema 权威。客户端 Models.swift 的 name/note 展示列由 schema 迁移补充。
 """
@@ -67,6 +68,11 @@ from app.db.store.schema import (
     _ensure_v130_columns,
     init_db,
 )
+from app.db.store.screen_config import (
+    get_screen_config,
+    get_screen_config_updated_at,
+    put_screen_config,
+)
 from app.db.store.trades import list_all_trades, list_closed_trades
 
 __all__ = [
@@ -88,4 +94,6 @@ __all__ = [
     "upsert_candidates", "list_candidates", "latest_candidate_date",
     "candidate_entry_date_of", "upsert_candidate_outcome", "list_outcomes",
     "pending_backfill_entries", "get_verdict", "upsert_analysis_verdict",
+    # 选股配置(v1.3.1 Phase B1)
+    "get_screen_config", "put_screen_config", "get_screen_config_updated_at",
 ]

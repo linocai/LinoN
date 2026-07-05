@@ -30,6 +30,7 @@ from app.api.schemas import (
     PositionsList,
     ReviewNoteIn,
     ReviewOut,
+    ScreenConfigIn,
 )
 from app.calendar.trading_calendar import (
     count_holding_trade_days,
@@ -350,6 +351,40 @@ def refresh_candidates() -> CandidatesRefreshOut:
     return CandidatesRefreshOut(ok=True, trade_date=td, count=count, degraded=degraded)
 
 
+# —— v1.3.1 Phase B2:选股配置可调化(GET 读活配置 / PUT 存增量)——————————————
+
+@app.get(f"{API_PREFIX}/screen/config", dependencies=[Depends(require_token)])
+def get_screen_config_endpoint() -> dict:
+    """读选股配置(plan §4 Phase B2)。
+
+    config = resolve_screen_config() 全量已夹紧/归一活配置(供 UI 显示生效值);
+    defaults = DEFAULT_SCREEN_CONFIG(供"恢复默认"UI 参照);updated_at = 用户最近一次
+    PUT 的时间戳(无用户改动过 → None)。
+    """
+    user_cfg = store.get_screen_config()
+    resolved = rules.resolve_screen_config(user_cfg)
+    return {
+        "config": resolved,
+        "defaults": dict(rules.DEFAULT_SCREEN_CONFIG),
+        "updated_at": store.get_screen_config_updated_at(),
+    }
+
+
+@app.put(f"{API_PREFIX}/screen/config", dependencies=[Depends(require_token)])
+def put_screen_config_endpoint(body: ScreenConfigIn) -> dict:
+    """写选股配置增量(plan §4 Phase B2)。
+
+    body.config 逐键按 SCREEN_CONFIG_SPEC 夹紧(不归一,归一只在 resolve 全量后做)→
+    存增量(覆盖式替换整行,未提交的键不再保留——PUT 语义是"以本次提交为新的用户增量全集",
+    非累加式 patch)。**恢复默认 = PUT `{config:{}}`**(空 dict)→ 存空增量,resolve 时
+    全部落回默认值,不是把当前 DEFAULT 冻结进库。越界值一律夹紧,不 422。
+    """
+    clamped = rules.validate_screen_config(body.config, normalize_weights=False)
+    store.put_screen_config(clamped)
+    resolved = rules.resolve_screen_config(clamped)
+    return {"ok": True, "config": resolved}
+
+
 # —— 候选重算编排(端点 + EOD tick 共用)————————————————————————————————
 
 def _candidate_basis_date() -> str:
@@ -369,10 +404,23 @@ def _recompute_candidates() -> tuple:
     """拉全市场 → 粗筛排序 → upsert candidates 表。返回 (count, trade_date_disp, degraded)。
 
     可注入测试替身:模块级 _pipeline_fn(避免单测联网)。
+
+    v1.3.1 Phase B2(生效机制,钉死・重要#3):选股配置的唯一生效入口——
+    resolve_screen_config() 出 cfg → 显式穿参给 run_pipeline(cfg)(禁止 monkeypatch
+    rules 模块级常量)。**注入的测试替身 _pipeline_fn 只按 1 参(basis)调用**(保
+    test_candidates_api.py 现有 `lambda basis: (...)` 注入不回归)——cfg 只在使用
+    【默认】_default_pipeline_fn 时才穿进 run_pipeline;显式注入替身的测试场景本就
+    用固定假候选,不经真实 pipeline 阈值路径。
     """
+    from app.screen import rules
     basis = _candidate_basis_date()
+    injected = _pipeline_fn is not _default_pipeline_fn
     try:
-        rows, degraded, _reason, td = _pipeline_fn(basis)
+        if injected:
+            rows, degraded, _reason, td = _pipeline_fn(basis)
+        else:
+            cfg = rules.resolve_screen_config(store.get_screen_config())
+            rows, degraded, _reason, td = _pipeline_fn(basis, cfg=cfg)
     except Exception:
         logger.warning("候选重算异常(已吞)", exc_info=True)
         return 0, _disp_date(basis), True
@@ -381,9 +429,9 @@ def _recompute_candidates() -> tuple:
     return len(rows), td, degraded
 
 
-def _default_pipeline_fn(basis_yyyymmdd: str):
+def _default_pipeline_fn(basis_yyyymmdd: str, cfg: Optional[dict] = None):
     from app.screen.pipeline import run_pipeline
-    return run_pipeline(basis_yyyymmdd)
+    return run_pipeline(basis_yyyymmdd, cfg=cfg)
 
 
 # 可注入测试替身(避免单测联网/真拉 Tushare)。

@@ -53,19 +53,29 @@ def _fmt_turnover(pct: float) -> str:
     return f"{pct:.1f}%"
 
 
-def passes_coarse(sr: StockRow) -> bool:
+def passes_coarse(sr: StockRow, cfg: Optional[Dict[str, Any]] = None) -> bool:
     """粗筛宽条件(经验默认值,plan §4.1;**非生死阈,宁松勿紧**)。
 
-    量比(官方 daily_basic.volume_ratio)≥ VOL_RATIO_MIN(v1.3.1 A2 改口径,旧用
+    量比(官方 daily_basic.volume_ratio)≥ vol_ratio_min(v1.3.1 A2 改口径,旧用
     自算放量倍数)且 主力近 3 日净流入 > 0 且 当日非大幅净流出 且
     (创 20 日新高 或 站 20 日均线 任一即可)。任一不满足则粗筛淘汰。
     门槛宽:把"值不值得进"留给 LLM 深判,这里只挡明显不相关的票。
+
+    v1.3.1 Phase B:cfg 缺省(None)→ 直接回落 rules 模块级常量(VOL_RATIO_MIN/
+    DAY_OUTFLOW_FLOOR),行为与改前逐字节一致,保批1测试/旧调用不回归。cfg 传入
+    (resolve 后全量)时用 cfg["vol_ratio_min"/"day_outflow_floor"]。
     """
-    if sr.volume_ratio < rules.VOL_RATIO_MIN:
+    if cfg is not None:
+        vol_ratio_min = cfg.get("vol_ratio_min", rules.VOL_RATIO_MIN)
+        day_outflow_floor = cfg.get("day_outflow_floor", rules.DAY_OUTFLOW_FLOOR)
+    else:
+        vol_ratio_min = rules.VOL_RATIO_MIN
+        day_outflow_floor = rules.DAY_OUTFLOW_FLOOR
+    if sr.volume_ratio < vol_ratio_min:
         return False
     if sr.net_mf_3d <= 0:
         return False
-    if sr.net_mf_amount < rules.DAY_OUTFLOW_FLOOR:
+    if sr.net_mf_amount < day_outflow_floor:
         return False
     if not (sr.new_high_20d or sr.above_ma20):
         return False
@@ -77,13 +87,19 @@ def _sector_of(sr: StockRow) -> str:
     return sr.industry or "—"
 
 
-def build_candidates(snapshot: MarketSnapshot) -> List[Dict[str, Any]]:
+def build_candidates(
+    snapshot: MarketSnapshot, cfg: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
     """对快照执行 黑名单 → 粗筛 → 排序(全量),产候选 dict 列表(未截断)。
 
     v1.3.1 A1/A2:高位线 ≥100% 硬排除已删(不再有单独的"高位线"过滤阶段,只在
     展示层标注 warnLevel,见 _merge_warn/_warn_level)。截断在端点运行时做
     (v1.3.0 起固定 rules.CANDIDATE_LIMIT=20,不再随 free_slots 变化、不再满仓闭门);
     这里产**已排序的全部合格候选**并打 rank(1 起),端点再 prefix(rules.CANDIDATE_LIMIT)。
+
+    v1.3.1 Phase B:cfg 缺省(None)→ 回落 rules 默认常量(passes_coarse/rank_score 内部
+    各自处理,行为与改前逐字节一致,保批1测试/旧调用不回归)。cfg 传入(resolve 后全量)
+    时显式穿参 passes_coarse/rank_score/_merge_warn/_warn_level(生效机制,禁 monkeypatch)。
     """
     survivors: List[StockRow] = []
     for sr in snapshot.rows:
@@ -91,7 +107,7 @@ def build_candidates(snapshot: MarketSnapshot) -> List[Dict[str, Any]]:
         if rules.is_blacklisted(sr.code, sr.name, sr.industry):
             continue
         # 粗筛宽条件(经验默认值);高位线不再在此过滤,只在 warn 分级展示(v1.3.1 A1)
-        if not passes_coarse(sr):
+        if not passes_coarse(sr, cfg):
             continue
         survivors.append(sr)
 
@@ -110,6 +126,7 @@ def build_candidates(snapshot: MarketSnapshot) -> List[Dict[str, Any]]:
         total_mv_yis=[s.total_mv_yi for s in survivors],         # 信号4
         actives=[s.had_limit_up for s in survivors],             # 信号5
         day_pcts=[s.pct_chg for s in survivors],                 # 信号6(今日涨幅)
+        cfg=cfg,
     )
     # 展示分 score:对【全部 survivors】原始加权分 min-max 归一到 [SCORE_FLOOR,100](截断前,
     # 与 rank 同源同序、只展示不改排序;全相等/单票 → 中性满分 100;见 plan §4.0 打分展示口径)。
@@ -121,7 +138,7 @@ def build_candidates(snapshot: MarketSnapshot) -> List[Dict[str, Any]]:
 
     out: List[Dict[str, Any]] = []
     for i, (sr, _raw, disp) in enumerate(ranked, start=1):
-        warn = _merge_warn(sr)
+        warn = _merge_warn(sr, cfg)
         cand: Dict[str, Any] = {
             "rank": i,
             "name": sr.name,
@@ -138,38 +155,39 @@ def build_candidates(snapshot: MarketSnapshot) -> List[Dict[str, Any]]:
             "score": disp,  # 阶段3.1:当日相对分(展示,不参与排序/截断)
         }
         # v1.3.1 A2.5:warnLevel(≥100%→"high",其余 warn 场景→"amber",无→省略键)
-        level = _warn_level(sr)
+        level = _warn_level(sr, cfg)
         if level:
             cand["warnLevel"] = level
         out.append(cand)
     return out
 
 
-def _merge_warn(sr: StockRow) -> Optional[str]:
+def _merge_warn(sr: StockRow, cfg: Optional[Dict[str, Any]] = None) -> Optional[str]:
     """合并 60 日高位 warn(信号无关,现有) + 单日暴涨软闸 warn(信号6);仍单一可选字符串。
 
     两条都命中 → 拼接展示("；"分隔);只命中一条 → 该条;都不命中 → None。
     plan §4.1:warn 仍是 Optional[str],客户端 CandidateRow 已有琥珀降级逻辑,不改契约。
     """
-    high = rules.high_warn_text(sr.pct_60d)          # ≥50%(含≥100%) → 非空(v1.3.1 A1 改)
-    surge = rules.day_surge_warn_text(sr.pct_chg)    # 今日 ≥9% → 非空
+    high = rules.high_warn_text(sr.pct_60d)              # ≥50%(含≥100%) → 非空(v1.3.1 A1 改;
+                                                          # 高位分级阈不进配置,不吃 cfg)
+    surge = rules.day_surge_warn_text(sr.pct_chg, cfg)   # 今日 ≥day_surge_warn_pct → 非空
     parts = [w for w in (high, surge) if w]
     if not parts:
         return None
     return "；".join(parts)
 
 
-def _warn_level(sr: StockRow) -> Optional[str]:
+def _warn_level(sr: StockRow, cfg: Optional[Dict[str, Any]] = None) -> Optional[str]:
     """warnLevel 分级(v1.3.1 A2.5):≥100% 高位 → 'high'(红级);[50,100%) → 'amber'。
 
     高位分级与单日暴涨 warn 并列出现时,级别取最高(有 high 则 high,否则有 amber
     才 amber,否则 None)——见 plan §4.1 第4层:high_position_warn_level 已是最高优先级
     的红/琥珀,单日暴涨软闸仅在无高位分级时才把级别抬到 amber。
     """
-    high_level = rules.high_warn_level(sr.pct_60d)   # 'high' / 'amber' / None
+    high_level = rules.high_warn_level(sr.pct_60d)   # 'high' / 'amber' / None(阈不进配置)
     if high_level:
         return high_level
-    if rules.day_surge_warn_text(sr.pct_chg):
+    if rules.day_surge_warn_text(sr.pct_chg, cfg):
         return "amber"
     return None
 
@@ -195,6 +213,7 @@ def run_pipeline(
     trade_date_yyyymmdd: Optional[str] = None,
     *,
     snapshot_fn=None,
+    cfg: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Dict[str, Any]], bool, str, str]:
     """端到端:拉全市场快照 → 粗筛排序 → 候选 dict 列表(未截断)。
 
@@ -203,18 +222,27 @@ def run_pipeline(
       · 成功但当日零合格 → ([], False, "no_candidates", trade_date)(唯一的"歇")。
     snapshot_fn 可注入(测试用,免联网);默认 fetch_market_snapshot。
     trade_date_yyyymmdd 缺省时由调用方决定(D2 端点传 EOD 基准日)。
+
+    v1.3.1 Phase B:cfg(resolve 后全量活配置)显式穿参给 build_candidates(粗筛/排序/warn
+    用)+ 默认 snapshot_fn(fetch_market_snapshot,粗筛前的 pos_health/breakout_ok 派生用)。
+    **注入的测试替身 snapshot_fn 只按 1 参(td)调用**(保 test_screen.py 现有 `def _fail(td)`
+    等注入函数不回归)——cfg 只在使用【默认】fetch_market_snapshot 时才穿进快照拉取层;
+    显式注入 snapshot_fn 时 cfg 仍会传给 build_candidates(粗筛/排序生效),只是快照拉取
+    本身不吃 cfg(测试场景本就用样例 StockRow,不经真实 fetch 阈值路径)。cfg 缺省 None
+    → 全链路回落 rules 默认常量,行为与改前逐字节一致,保批1测试/旧调用不回归。
     """
+    injected = snapshot_fn is not None
     snapshot_fn = snapshot_fn or fetch_market_snapshot
     td = trade_date_yyyymmdd or datetime.now().strftime("%Y%m%d")
     try:
-        snap = snapshot_fn(td)
+        snap = snapshot_fn(td) if injected else snapshot_fn(td, cfg=cfg)
     except Exception as e:  # 任何异常都不崩
         return [], True, f"快照拉取异常: {e}", _disp(td)
 
     if not snap.ok:
         return [], True, snap.reason, snap.trade_date
 
-    rows = build_candidates(snap)
+    rows = build_candidates(snap, cfg)
     if not rows:
         return [], False, "no_candidates", snap.trade_date
     return rows, False, "ok", snap.trade_date
