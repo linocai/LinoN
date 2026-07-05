@@ -260,52 +260,13 @@ def test_trading_time_helpers():
     assert loop_mod._is_after_close(datetime(2026, 6, 23, 14, 0)) is False
 
 
-# —— D2:候选刷新 tick(EOD 后落表,注入假 pipeline 免联网)————————————
-
-def test_candidate_window_helper():
-    # 15:35 后才刷新候选(早于 EOD 推送 15:05)
-    assert loop_mod._is_after_candidate_window(datetime(2026, 6, 23, 15, 40)) is True
-    assert loop_mod._is_after_candidate_window(datetime(2026, 6, 23, 15, 10)) is False
-    assert loop_mod._is_after_candidate_window(datetime(2026, 6, 27, 16, 0)) is False  # 周六
+# —— v1.3.1 C1:候选刷新自动 tick 已删,唯一途径改纯手动(POST /candidates/refresh)——
+# 死码已删:loop 模块不再有 run_candidate_refresh/_is_after_candidate_window/
+# _CANDIDATE_AFTER,相应旧测试(test_candidate_window_helper/test_run_candidate_refresh_*)
+# 随之删除(建议#11:该编排函数从未被 app.py 端点调用,是纯死码)。
 
 
-def test_run_candidate_refresh_upserts(db):
-    """注入假 pipeline → run_candidate_refresh 落表一次。"""
-    rows = [{
-        "rank": 1, "name": "兆易创新", "code": "603986", "sector": "半导体",
-        "tag": "放量突破", "price": 100.0, "chg": "+5.00%", "volMultiple": "2.8x",
-        "volPct": 90, "flow": "+1.20亿", "turnover": "4.6%", "warn": None,
-    }]
-    res = loop_mod.run_candidate_refresh(
-        now=datetime(2026, 6, 23, 15, 40),
-        pipeline_fn=lambda basis: (rows, False, "ok", "2026-06-23"),
-        db_path=db,
-    )
-    assert res["count"] == 1 and res["degraded"] is False
-    cached = store.list_candidates("2026-06-23", db_path=db)
-    assert len(cached) == 1 and cached[0]["code"] == "603986"
-
-
-def test_run_candidate_refresh_degraded_safe(db):
-    """pipeline degraded → 落空表,不崩。"""
-    res = loop_mod.run_candidate_refresh(
-        now=datetime(2026, 6, 23, 15, 40),
-        pipeline_fn=lambda basis: ([], True, "token 缺失", "2026-06-23"),
-        db_path=db,
-    )
-    assert res["count"] == 0 and res["degraded"] is True
-
-
-def test_run_candidate_refresh_exception_safe(db):
-    """pipeline 抛异常被吞,不掀翻。"""
-    def _boom(basis):
-        raise RuntimeError("network down")
-    res = loop_mod.run_candidate_refresh(now=datetime(2026, 6, 23, 15, 40),
-                                         pipeline_fn=_boom, db_path=db)
-    assert res["count"] == 0 and res["degraded"] is True
-
-
-# —— F3:候选回测回填(EOD 候选刷新之后,注入假 backfill_fn 免联网)——————————
+# —— F3:候选回测回填(v1.3.1 C1 改:挂 EOD 块内,注入假 backfill_fn 免联网)——————————
 
 def test_run_candidate_backfill_calls_injected_fn(db):
     captured = {}
@@ -348,3 +309,81 @@ def test_run_candidate_backfill_default_fn_wires_to_backtest_module(db, monkeypa
     res = loop_mod.run_candidate_backfill(now=datetime(2026, 6, 26, 15, 40), db_path=db)
     assert res["entries_scanned"] == 0
     assert called["now"] == datetime(2026, 6, 26, 15, 40)
+
+
+# ————————————————————————————————————————————————————————————————————
+# v1.3.1 C1:候选刷新自动 tick 已删(死码验证)+ 回填改挂 EOD 块内(每交易日仅触发一次)
+# ————————————————————————————————————————————————————————————————————
+
+def test_candidate_auto_refresh_helpers_removed():
+    """死码已删(建议#11):loop 模块不再有候选刷新自动 tick 相关的任何名字。"""
+    assert not hasattr(loop_mod, "run_candidate_refresh")
+    assert not hasattr(loop_mod, "_is_after_candidate_window")
+    assert not hasattr(loop_mod, "_CANDIDATE_AFTER")
+    assert not hasattr(loop_mod, "_default_pipeline_fn")   # loop 层的死码版本(非 app.py 那份)
+
+
+def test_eod_tick_and_backfill_still_present_and_wired():
+    """⚠ 保留不动:EOD 摘要 tick(run_eod_tick)未被误删;回填函数仍存在(挂载点改了,函数不变)。"""
+    assert hasattr(loop_mod, "run_eod_tick")
+    assert hasattr(loop_mod, "run_candidate_backfill")
+
+
+def test_monitor_loop_source_guards_backfill_inside_eod_block():
+    """grep 守卫(封死重要#7):run_candidate_backfill 调用必须在 last_eod_date 守卫的
+    EOD 分支内,不能是无守卫的独立 if 块(否则 15:05-24:00 每 5min 打一遍 Tushare)。
+    """
+    import inspect
+    src = inspect.getsource(loop_mod.monitor_loop)
+    # 定位 EOD 分支所在整段(elif ... 到下一个顶层 else/except 之前)
+    eod_idx = src.index("elif _is_after_close(now)")
+    backfill_idx = src.index("run_candidate_backfill")
+    else_idx = src.index("else:", eod_idx)
+    # run_candidate_backfill 调用位置必须落在 "elif _is_after_close" 之后、下一个 "else:" 之前
+    assert eod_idx < backfill_idx < else_idx
+    # 不再有 last_candidate_date 这个内存防重变量(候选刷新 tick 已删)
+    assert "last_candidate_date" not in src
+
+
+def test_monitor_loop_eod_and_backfill_run_once_per_trading_day_after_close(db, monkeypatch):
+    """端到端(注入 asyncio.to_thread 底层调用,免真拉网):同一天多次 tick 触发
+    收盘后判定,run_eod_tick/run_candidate_backfill 都只各跑一次(last_eod_date 守卫);
+    非交易时段(交易时段内)不触发候选回填(重要#7 门禁:回填绝不能在收盘前跑)。
+    """
+    import asyncio
+    from app.config import settings as st
+    monkeypatch.setattr(st, "DB_PATH", db, raising=False)
+
+    eod_calls = []
+    backfill_calls = []
+    monkeypatch.setattr(loop_mod, "run_eod_tick", lambda **kw: eod_calls.append(kw) or {"summaries": [], "pushes": 0})
+    monkeypatch.setattr(loop_mod, "run_candidate_backfill", lambda **kw: backfill_calls.append(kw) or {"filled": 0, "skipped": 0, "entries_scanned": 0})
+    monkeypatch.setattr(loop_mod, "run_one_tick", lambda **kw: {"events": [], "pushes": 0, "holdings": 0})
+
+    # 固定 now 恒为同一交易日收盘后时刻(2026-06-23 周二 15:10),3 轮循环后主动停止。
+    fixed_now = datetime(2026, 6, 23, 15, 10, 0)
+    call_count = {"n": 0}
+
+    class _FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    monkeypatch.setattr(loop_mod, "datetime", _FixedDateTime)
+
+    async def _drive():
+        esc = EscalationManager(interval_min=15)
+        stop_event = asyncio.Event()
+
+        async def _stopper():
+            # 让 monitor_loop 空转几轮(每轮 now 都相同 → 第2轮起 last_eod_date 已命中,不再重跑)
+            await asyncio.sleep(0.05)
+            stop_event.set()
+
+        await asyncio.gather(loop_mod.monitor_loop(esc, stop_event), _stopper())
+
+    asyncio.run(_drive())
+
+    # 同一天多轮 tick,EOD/回填都只各触发一次(last_eod_date 守卫生效,重要#7 门禁)
+    assert len(eod_calls) == 1
+    assert len(backfill_calls) == 1

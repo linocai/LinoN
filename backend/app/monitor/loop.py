@@ -6,7 +6,11 @@
   · 用 trading_window(today) 判交易时段;非交易时段休眠(粗轮询,省 CPU)。
   · 交易时段每 ~60s:拉在持仓票实时价(get_realtime_quotes)→ 两源一致性校验
     → classify 产出硬线事件 → 喂 EscalationManager → due_pushes → 真发 APNs(遍历 device_tokens)。
-  · 收盘后(~15:05 过一次)对每持仓推 EOD 摘要(每自然交易日仅一次)。
+  · 收盘后(~15:05 过一次)对每持仓推 EOD 摘要(每自然交易日仅一次);紧接着顺跑候选
+    回测回填(阶段2.5 F3,同一 last_eod_date 守卫,v1.3.1 C1 从原候选刷新 tick 移出)。
+
+v1.3.1 C1:候选 15:35 自动刷新 tick 已删(改纯手动,唯一途径 = `POST /candidates/refresh`
+经 app.py `_recompute_candidates`);本模块不再有 run_candidate_refresh(死码已删)。
 
 可注入:push_fn(默认 apns.send_push)、quotes_fn(默认 get_realtime_quotes)、clock,
 便于单测在不联网/不真推的前提下驱动一轮。
@@ -47,8 +51,6 @@ POLL_INTERVAL_SEC = 60
 IDLE_SLEEP_SEC = 300
 # 收盘判定:15:00 收盘,留 5min 让 EOD 数据稳定
 _EOD_AFTER = time(15, 5)
-# 候选刷新时点:收盘后 15:35(等 Tushare 当日 EOD 数据稳定;plan §4.0 / Review 拍板)
-_CANDIDATE_AFTER = time(15, 35)
 
 
 def _is_trading_now(now: datetime) -> bool:
@@ -63,11 +65,6 @@ def _is_trading_now(now: datetime) -> bool:
 def _is_after_close(now: datetime) -> bool:
     """是否已过收盘(交易日且 >= 15:05)。"""
     return trading_window(now.date()) is not None and now.time() >= _EOD_AFTER
-
-
-def _is_after_candidate_window(now: datetime) -> bool:
-    """是否已过候选刷新时点(交易日且 >= 15:35)。"""
-    return trading_window(now.date()) is not None and now.time() >= _CANDIDATE_AFTER
 
 
 def _build_two_source_quotes(codes: List[str]) -> Dict[str, dict]:
@@ -277,41 +274,6 @@ def run_eod_tick(
     return {"summaries": summaries, "pushes": pushes}
 
 
-def run_candidate_refresh(
-    *,
-    now: datetime,
-    pipeline_fn: Optional[Callable[[str], object]] = None,
-    db_path: Optional[str] = None,
-) -> Dict[str, object]:
-    """EOD 后算当日候选并 upsert candidates 表(阶段2 D2)。
-
-    每交易日一次(调用方用 last_candidate_date 防重)。pipeline 拉全市场 → 粗筛排序
-    → 落表。无 token/拉取失败 → degraded,count=0,不崩(降级契约)。
-    失败吞异常不掀翻轮询(调用方 monitor_loop 已有 try,这里再兜一层)。
-
-    pipeline_fn 可注入(测试免联网):签名 (basis_yyyymmdd) -> (rows, degraded, reason, trade_date_disp)。
-    """
-    pipeline_fn = pipeline_fn or _default_pipeline_fn
-    # 候选 EOD 基准日:今天是交易日用今天(已过 15:35),否则上一交易日。
-    from app.calendar.trading_calendar import prev_trading_day as _prev, is_trading_day as _istd
-    today = now.date()
-    basis_d = today if _istd(today) else _prev(today)
-    basis = basis_d.strftime("%Y%m%d")
-    try:
-        rows, degraded, reason, td = pipeline_fn(basis)
-    except Exception as e:
-        logger.warning("候选刷新 pipeline 异常(已吞): %s", e)
-        return {"count": 0, "degraded": True, "trade_date": ""}
-    store.upsert_candidates(td, rows, db_path=db_path)
-    logger.info("候选刷新落表 %d 条(trade_date=%s, degraded=%s)", len(rows), td, degraded)
-    return {"count": len(rows), "degraded": degraded, "trade_date": td}
-
-
-def _default_pipeline_fn(basis_yyyymmdd: str):
-    from app.screen.pipeline import run_pipeline
-    return run_pipeline(basis_yyyymmdd)
-
-
 def _default_quotes_fn(codes: List[str]) -> Dict[str, object]:
     from app.data.realtime import get_realtime_quotes
     return get_realtime_quotes(codes)
@@ -350,10 +312,14 @@ async def monitor_loop(esc: EscalationManager, stop_event: asyncio.Event) -> Non
     """常驻后台轮询协程。stop_event 置位时优雅退出。
 
     交易时段每 POLL_INTERVAL_SEC 跑 run_one_tick;非交易时段粗休眠。
-    收盘后(每交易日一次)跑 run_eod_tick。
+    收盘后(每交易日一次)跑 run_eod_tick,紧接着顺跑候选回测回填(阶段2.5 F3)。
+
+    v1.3.1 C1:候选刷新 15:35 自动 tick 已删(改纯手动,唯一途径 = `POST /candidates/refresh`);
+    回填改挂在 EOD 块内(借 last_eod_date 天然每交易日一次触发,重要#7:回填的
+    UNIQUE(entry_date,code) 只防重复落库、防不了重复打 Tushare,必须有触发节流,
+    不能是无守卫的 `if _is_after_close: run_backfill`)。
     """
     last_eod_date: Optional[date] = None
-    last_candidate_date: Optional[date] = None
     logger.info("监控轮询启动(单 unit;sandbox=%s)", settings.APNS_USE_SANDBOX)
     while not stop_event.is_set():
         now = datetime.now()
@@ -364,17 +330,12 @@ async def monitor_loop(esc: EscalationManager, stop_event: asyncio.Event) -> Non
             elif _is_after_close(now) and last_eod_date != now.date():
                 await asyncio.to_thread(run_eod_tick, now=now)
                 last_eod_date = now.date()
+                # 候选回测回填(阶段2.5 F3,v1.3.1 C1 从原候选刷新 tick 移出):
+                # 挂在 EOD 块内借 last_eod_date 守卫,每交易日仅触发一次(重要#7)。
+                await asyncio.to_thread(run_candidate_backfill, now=now)
                 sleep_for = IDLE_SLEEP_SEC
             else:
                 sleep_for = IDLE_SLEEP_SEC
-            # 候选刷新(>=15:35,每交易日一次,与 EOD 推送解耦;失败吞异常不掀翻轮询)
-            if _is_after_candidate_window(now) and last_candidate_date != now.date():
-                await asyncio.to_thread(run_candidate_refresh, now=now)
-                last_candidate_date = now.date()
-                # 候选刷新之后跑回测回填(阶段2.5 F3):扫描式防重,不靠内存变量,
-                # 无需与 last_candidate_date 绑定同一次 tick(下次 tick 也会重新扫描,
-                # 已回填的 UNIQUE(entry_date,code) 幂等跳过,不重复不掀翻轮询)。
-                await asyncio.to_thread(run_candidate_backfill, now=now)
         except Exception as e:  # 轮询任何异常不得掀翻常驻协程
             logger.exception("监控轮询单轮异常(已吞,继续): %s", e)
             sleep_for = POLL_INTERVAL_SEC

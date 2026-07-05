@@ -1,6 +1,8 @@
 """候选缓存表(阶段2 D1/D2:EOD 算一次候选落表,端点读缓存)。
 
 score 列(阶段3.1)由 schema._ensure_candidates_columns 迁移补充;旧行 score=NULL 回读兜底 0。
+warn_level 列(v1.3.1 A2.5,第四次真 migration)同一函数补充;旧行 warn_level=NULL 回读省略键
+(前向兼容,同 warn 惯例)。
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ _CANDIDATE_KEYS = (
     ("flow", "flow"),
     ("turnover", "turnover"),
     ("warn", "warn"),
+    ("warn_level", "warnLevel"),   # v1.3.1 A2.5:高位分级(red/amber),第四次真 migration
 )
 
 
@@ -43,8 +46,9 @@ def upsert_candidates(
             conn.execute(
                 """INSERT INTO candidates
                    (trade_date, rank, code, name, sector, tag, price, chg,
-                    vol_multiple, vol_pct, flow, turnover, warn, score, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    vol_multiple, vol_pct, flow, turnover, warn, score, warn_level,
+                    created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trade_date,
                     int(r.get("rank", 0)),
@@ -60,6 +64,7 @@ def upsert_candidates(
                     r.get("turnover"),
                     r.get("warn"),
                     int(r.get("score", 0)),   # 阶段3.1:pipeline 一定带 score,缺省兜底 0
+                    r.get("warnLevel"),        # v1.3.1 A2.5:None → NULL(旧行/无警示票同此)
                     now,
                 ),
             )
@@ -72,7 +77,7 @@ def upsert_candidates(
 
 def list_candidates(trade_date: str, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
     """读某 trade_date 的候选缓存,按 rank 升序。返回 Candidate 形状 dict 列表
-    (camelCase 键,对齐 Models.swift / plan §4.3;warn 为 None 时省略键)。
+    (camelCase 键,对齐 Models.swift / plan §4.3;warn/warnLevel 为 None 时省略键)。
     """
     conn = get_connection(db_path)
     try:
@@ -103,6 +108,10 @@ def list_candidates(trade_date: str, db_path: Optional[str] = None) -> List[Dict
         }
         if d.get("warn"):
             cand["warn"] = d["warn"]
+        # v1.3.1 A2.5:warn_level(高位分级红/琥珀)。旧行/无警示票 warn_level=NULL → 省略键
+        # (前向兼容,客户端解到 nil,同 warn 惯例;致命#1 门禁的关键回读点)。
+        if d.get("warn_level"):
+            cand["warnLevel"] = d["warn_level"]
         out.append(cand)
     return out
 

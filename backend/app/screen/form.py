@@ -37,6 +37,8 @@ class FormResult:
     pct_60d: Optional[float] = None   # 近 60 交易日累计涨幅 %(复权后价)
     vwap_ok: bool = False             # 收盘站当日 VWAP(信号1;缺 amount → 保守 False)
     had_limit_up: bool = False        # 近 N 日(排除今日)有涨停(信号5;数据不足 → False)
+    pos_health: float = 0.0           # 位置健康(距60日高点,v1.3.1 A1;数据不足<20日 → 0.0)
+    breakout_ok: bool = False         # 横盘突破(v1.3.1 A1 新增;缺 volume_ratio/数据不足 → False)
 
 
 def qfq_closes(raw_closes: List[float], adj_factors: List[Optional[float]]) -> List[float]:
@@ -65,6 +67,7 @@ def compute_form(
     closes_new_to_old: List[float],
     vols_new_to_old: List[float],
     amounts_new_to_old: Optional[List[float]] = None,
+    volume_ratio: Optional[float] = None,
 ) -> FormResult:
     """从近 N 日【已复权】收盘价序列 + 原始成交量序列(均新→旧)算形态。
 
@@ -86,6 +89,21 @@ def compute_form(
         不用原始 daily.pct_chg——复权序列消除除权跳变、不产假涨停,plan §4.0 🟡#2),
         扫【排除今日】的 pct[1 : 1+ACTIVE_LOOKBACK_DAYS](🟡#1;index 0 是今天),
         任一 >= rules.LIMIT_UP_PCT → True。数据不足 → False。
+
+    v1.3.1 A1 新增(plan §4.1,只新增一个可选入参 volume_ratio):
+      · pos_health(位置健康,距60日高点)= closes[0] / max(closes[:min(60,len)])。
+        分母 <=0 → 0.0。**数据不足 len<20 → 0.0**(建议#9:次新股只几天数据会贴短命
+        高点白拿满权,压掉,保守压分不误抬)。范围 (0,1]。
+      · breakout_ok(横盘突破)= 满足全部三条才 True:
+          ① 近24日(**排除今日**,closes[1:25])振幅收窄:
+             (max(closes[1:25])-min(closes[1:25])) / min(closes[1:25]) < BREAKOUT_RANGE_MAX;
+          ② 今日突破区间上沿:closes[0] > max(closes[1:25]);
+          ③ 量比配合:volume_ratio >= BREAKOUT_VOL_RATIO_MIN。
+        **振幅窗口必须排除今日(重要#5)**——若把今日纳入振幅窗口,而突破条又令今日=
+        最高,振幅会退化为 (今日-最低)/最低、越有力突破越判 False(把窄横盘+大阳线
+        突破自己掐灭);故振幅与突破都在 closes[1:25](过去24日,不含今日)上算。
+        volume_ratio 缺失(None,向后兼容旧调用点)→ 条③视为不满足 → breakout_ok=False。
+        数据不足 25 日(closes[1:25] 拿不满)→ False。
     """
     result = FormResult()
     if not closes_new_to_old:
@@ -149,5 +167,25 @@ def compute_form(
         if pct >= rules.LIMIT_UP_PCT:
             result.had_limit_up = True
             break
+
+    # 位置健康 pos_health(v1.3.1 A1):距60日高点,今日收盘/近60日最高收盘。
+    # 数据不足 len<20 → 0.0(建议#9:次新股短命高点白拿满权,保守压分)。
+    if n_close >= 20:
+        window60 = closes_new_to_old[: min(60, n_close)]
+        peak = max(window60) if window60 else 0.0
+        if peak > 0:
+            result.pos_health = today_close / peak
+
+    # 横盘突破 breakout_ok(v1.3.1 A1 新增):近24日(排除今日,closes[1:25])振幅收窄 +
+    # 今日突破区间上沿 + 量比配合,三条全满足才 True。数据不足 25 日 → False。
+    window24 = closes_new_to_old[1:25]
+    if len(window24) == 24 and volume_ratio is not None:
+        lo24, hi24 = min(window24), max(window24)
+        if lo24 > 0:
+            range_pct = (hi24 - lo24) / lo24
+            narrow = range_pct < rules.BREAKOUT_RANGE_MAX
+            breaks_out = today_close > hi24
+            vol_ok = volume_ratio >= rules.BREAKOUT_VOL_RATIO_MIN
+            result.breakout_ok = narrow and breaks_out and vol_ok
 
     return result

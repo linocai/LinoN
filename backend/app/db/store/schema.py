@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS candidates (
     created_at   TEXT    NOT NULL,
     UNIQUE(trade_date, code)
     -- score 列由 _ensure_candidates_columns() 迁移补充(阶段3.1,ALTER ADD COLUMN,不在此 DDL)
+    -- warn_level 列由 _ensure_candidates_columns() 迁移补充(v1.3.1 A2.5,ALTER ADD COLUMN,不在此 DDL)
 );
 
 CREATE TABLE IF NOT EXISTS candidate_outcomes (
@@ -139,24 +140,31 @@ def _ensure_trades_columns(conn: sqlite3.Connection) -> None:
 
 
 def _ensure_candidates_columns(conn: sqlite3.Connection) -> None:
-    """给 candidates 表补 score 列(阶段3.1,项目第二次真 migration,高危区)。
+    """给 candidates 表补 score/warn_level 列(阶段3.1 + v1.3.1 A2.5,项目第二/第四次
+    真 migration,高危区)。
 
-    与 _ensure_trades_columns 完全同套姿势:PRAGMA table_info 精确集合探测缺 score 则
+    与 _ensure_trades_columns 完全同套姿势:PRAGMA table_info 精确集合探测缺列则
     ALTER TABLE ADD COLUMN;整段 try/except **只 log.error,不 re-raise**——init_db 跑在
     app.py lifespan 启动路径、每次 ECS 重启都执行,一个展示列的迁移绝不能拖垮整个交易
-    监控服务的 startup(score 缺了候选照跑,只是不显示分数)。
+    监控服务的 startup(score/warn_level 缺了候选照跑,只是不显示分数/红标)。
 
     **为何 ALTER 不 DROP**(plan §4.1 否决方案②):pending_backfill_entries 的回填扫描
     FROM candidates LEFT JOIN candidate_outcomes 读 candidates 表**历史行**找未回填样本,
     DROP 重建会丢掉"已产候选但回测未回填(entry_date 距今不足 4 交易日)"的历史行,导致
     这批候选的回测样本永久丢失。故 candidates 表历史行不可 DROP,必须走 ALTER 保留历史。
+
+    **v1.3.1 A2.5 新增 warn_level TEXT**(第四次真 migration):候选高位分级(红/琥珀)
+    经 candidates 缓存表往返展示,不做此列会导致 warnLevel 字段在 upsert 时被逐列白名单
+    INSERT 静默丢弃、GET /candidates 读不回,红标功能生产静默失效(致命#1)。
     """
     try:
         existing = {row[1] for row in conn.execute("PRAGMA table_info(candidates)")}  # row[1] = 列名
         if "score" not in existing:
             conn.execute("ALTER TABLE candidates ADD COLUMN score INTEGER")
+        if "warn_level" not in existing:
+            conn.execute("ALTER TABLE candidates ADD COLUMN warn_level TEXT")
     except Exception:
-        log.error("candidates 补列(score)迁移异常(已吞,不拖垮 startup)", exc_info=True)
+        log.error("candidates 补列(score/warn_level)迁移异常(已吞,不拖垮 startup)", exc_info=True)
 
 
 def _ensure_v130_columns(conn: sqlite3.Connection) -> None:

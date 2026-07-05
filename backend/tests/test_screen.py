@@ -45,11 +45,13 @@ def test_baijiu_industry_none_safe():
     assert rules.is_baijiu_industry("红黄酒") is True   # 黄酒 子串命中
 
 
-# —— rules:高位线(二元 + warn 降级)————————————————————————————————
+# —— rules:高位线(v1.3.1 A1 改:不再 exclude,只分级 warn)——————————————
 
 def test_high_position_verdict():
-    assert rules.high_position_verdict(120.0) == "exclude"
-    assert rules.high_position_verdict(100.0) == "exclude"
+    """v1.3.1 起 ≥100% 不再 'exclude',改归 'warn'(plan §4.1 A1 验收)。"""
+    assert rules.high_position_verdict(200.0) == "warn"   # 门禁用例:pct_60d=200 → warn 非 exclude
+    assert rules.high_position_verdict(120.0) == "warn"
+    assert rules.high_position_verdict(100.0) == "warn"
     assert rules.high_position_verdict(80.0) == "warn"
     assert rules.high_position_verdict(50.0) == "warn"
     assert rules.high_position_verdict(49.9) == "ok"
@@ -57,9 +59,28 @@ def test_high_position_verdict():
     assert rules.high_position_verdict(None) == "ok"
 
 
+def test_high_position_verdict_no_exclude_branch():
+    """rules 模块不再产 'exclude' 判定(硬排除已删,plan §4.1)。"""
+    for pct in (0.0, 49.9, 50.0, 80.0, 100.0, 120.0, 500.0):
+        assert rules.high_position_verdict(pct) != "exclude"
+
+
+def test_high_warn_level():
+    assert rules.high_warn_level(200.0) == "high"
+    assert rules.high_warn_level(100.0) == "high"
+    assert rules.high_warn_level(80.0) == "amber"
+    assert rules.high_warn_level(50.0) == "amber"
+    assert rules.high_warn_level(49.9) is None
+    assert rules.high_warn_level(None) is None
+
+
 def test_high_warn_text():
     assert rules.high_warn_text(60.0) is not None
-    assert rules.high_warn_text(120.0) is None   # ≥100 已排除,不出 warn
+    # v1.3.1 重要#6:≥100% 不再 None(旧 exclude 轮不到产文案;现在仍会出现在候选池,
+    # 必须有红级文案配套 warnLevel=high)。
+    assert rules.high_warn_text(200.0) is not None
+    assert "极高位" in rules.high_warn_text(200.0)
+    assert rules.high_warn_text(120.0) is not None
     assert rules.high_warn_text(10.0) is None
     assert rules.high_warn_text(None) is None
 
@@ -83,99 +104,122 @@ def test_rules_max_holdings_not_redefined():
     assert not hasattr(rules, "MAX_HOLDINGS")
 
 
-# —— rules:排序加权(放量权重最大)————————————————————————————————
+# —— rules:排序加权(v1.3.1 A1 换新九因子集,量比权重最大)——————————————————
 
-def _rank_score(vol, fund, turn, pct60, *, vwap=None, mv=None, active=None, day=None):
-    """阶段3.1 八参 rank_score 的测试辅助:新因子缺省给中性(不影响相对比较)。
+def _rank_score(vol_ratio, fund, turn, pos_health, *, vwap=None, breakout=None,
+                mv=None, active=None, day=None):
+    """v1.3.1 九参 rank_score 的测试辅助:新因子缺省给中性(不影响相对比较)。
 
-    vwap/active 缺省 False(0 分,等值不影响相对次序);mv 缺省 0(<=0 → 中性 0.5,
-    全相等不影响);day 缺省 0(无罚)。等长同序。
+    vwap/breakout/active 缺省 False(0 分,等值不影响相对次序);mv 缺省 0
+    (<=0 → 中性 0.5,全相等不影响);day 缺省 0(无罚)。等长同序。
     """
-    n = len(vol)
+    n = len(vol_ratio)
     return rules.rank_score(
-        vol_multiples=vol, fund_3d=fund, turnovers=turn, pct_60ds=pct60,
+        vol_ratios=vol_ratio, fund_3d=fund, turnovers=turn, pos_healths=pos_health,
         vwap_oks=vwap if vwap is not None else [False] * n,
+        breakout_oks=breakout if breakout is not None else [False] * n,
         total_mv_yis=mv if mv is not None else [0.0] * n,
         actives=active if active is not None else [False] * n,
         day_pcts=day if day is not None else [0.0] * n,
     )
 
 
-def test_rank_score_vol_is_single_largest_factor():
-    # 放量是单一最大权因子(0.28):其余因子等值、仅放量不同 → 放量高者得分高。
-    scores = _rank_score([5.0, 1.5], [100.0, 100.0], [3.0, 3.0], [10.0, 10.0])
+def test_rank_score_vol_ratio_is_single_largest_factor():
+    # 量比是单一最大权因子(0.30):其余因子等值、仅量比不同 → 量比高者得分高。
+    scores = _rank_score([5.0, 1.5], [100.0, 100.0], [10.0, 10.0], [0.9, 0.9])
     assert scores[0] > scores[1]
 
 
-def test_rank_score_vol_outweighs_any_single_other():
-    # 放量权(0.28)大于任意单个其他正权因子:A 仅放量满分,B 仅资金满分 → A 胜。
+def test_rank_score_vol_ratio_outweighs_any_single_other():
+    # 量比权(0.30)大于任意单个其他正权因子:A 仅量比满分,B 仅资金满分 → A 胜。
     scores = _rank_score(
-        [5.0, 1.5],       # A 放量满分,B 最低
+        [5.0, 1.5],       # A 量比满分,B 最低
         [100.0, 999.0],   # B 资金满分,A 最低
-        [3.0, 3.0],
         [10.0, 10.0],
+        [0.9, 0.9],
     )
-    assert scores[0] > scores[1]    # 0.28(vol) > 0.20(fund)
+    assert scores[0] > scores[1]    # 0.30(vol_ratio) > 0.06(fund)
 
 
 def test_rank_score_empty():
-    assert rules.rank_score([], [], [], [], [], [], [], []) == []
+    assert rules.rank_score([], [], [], [], [], [], [], [], []) == []
 
 
 def test_rank_score_all_equal_neutral():
     # 全相等输入(含新因子)→ 每票同分(_normalize 全 0.5 中性;新因子等值不产生区分度)。
-    scores = _rank_score([2.0, 2.0], [50.0, 50.0], [6.0, 6.0], [10.0, 10.0],
-                         vwap=[True, True], mv=[100.0, 100.0],
+    scores = _rank_score([2.0, 2.0], [50.0, 50.0], [10.0, 10.0], [0.8, 0.8],
+                         vwap=[True, True], breakout=[False, False], mv=[100.0, 100.0],
                          active=[False, False], day=[3.0, 3.0])
     assert scores[0] == scores[1]
 
 
 def test_rank_score_new_factors_shift_ranking():
-    # 两票放量/资金/换手/低位全相等,A 站 VWAP + 近期涨停,B 否 → A 分更高(信号1/5 生效)。
-    scores = _rank_score([2.0, 2.0], [50.0, 50.0], [6.0, 6.0], [10.0, 10.0],
+    # 两票量比/资金/换手/位置健康全相等,A 站 VWAP + 近期涨停,B 否 → A 分更高(信号1/5 生效)。
+    scores = _rank_score([2.0, 2.0], [50.0, 50.0], [10.0, 10.0], [0.8, 0.8],
                          vwap=[True, False], active=[True, False])
+    assert scores[0] > scores[1]
+
+
+def test_rank_score_pos_health_not_min_maxed():
+    """pos_health 直接进分不走 min-max:两票 0.99 vs 0.30,其余全等 → 0.99 得高分(plan §4.1 A1)。"""
+    scores = _rank_score([2.0, 2.0], [50.0, 50.0], [10.0, 10.0], [0.99, 0.30])
+    assert scores[0] > scores[1]
+
+
+def test_rank_score_breakout_shifts_ranking():
+    """两票其余全等,A breakout_ok=True、B False → A 分更高(信号7 生效)。"""
+    scores = _rank_score([2.0, 2.0], [50.0, 50.0], [10.0, 10.0], [0.8, 0.8],
+                         breakout=[True, False])
     assert scores[0] > scores[1]
 
 
 def test_rank_score_day_surge_is_penalty():
     # 两票其余全等,A 今日暴涨(涨停)、B 温和 → A 被罚,分更低(信号6 负权)。
-    scores = _rank_score([2.0, 2.0], [50.0, 50.0], [6.0, 6.0], [10.0, 10.0],
+    scores = _rank_score([2.0, 2.0], [50.0, 50.0], [10.0, 10.0], [0.8, 0.8],
                          day=[9.8, 3.0])
     assert scores[0] < scores[1]
 
 
 def test_weights_positive_sum_to_one():
-    # 正权之和 = 1.0(day_surge 是罚项 -0.06,不计入正权和)。
+    # 正权之和 = 1.00(day_surge 是罚项 -0.06,不计入正权和;v1.3.1 A1 九键新向量)。
     pos = sum(w for w in rules.WEIGHTS.values() if w > 0)
     assert abs(pos - 1.0) < 1e-9
     assert rules.WEIGHTS["day_surge"] < 0   # 罚项为负
+    assert set(rules.WEIGHTS.keys()) == {
+        "vol_ratio", "pos_health", "turnover", "vwap", "breakout",
+        "mv_elastic", "active", "fund", "day_surge",
+    }
+    assert rules.WEIGHTS["vol_ratio"] == 0.30   # 权重最大
 
 
-# —— rules:阶段3.1 评分函数边界(信号3/4/6)——————————————————————————
+# —— rules:阶段3.1/v1.3.1 评分函数边界(信号3/4/6)————————————————————————
 
 def test_turnover_health_score_boundaries():
-    # 3% < 下沿5% → 衰减(<1);7% 落健康带 → 满分 1.0;15% > 上沿10% → 衰减(<1)。
-    assert rules.turnover_health_score(7.0) == 1.0        # 健康带满分
-    assert rules.turnover_health_score(5.0) == 1.0        # 下沿含端点
-    assert rules.turnover_health_score(10.0) == 1.0       # 上沿含端点
-    assert 0.0 < rules.turnover_health_score(3.0) < 1.0   # 过低衰减
-    assert 0.0 < rules.turnover_health_score(15.0) < 1.0  # 过高衰减
+    # v1.3.1 改带 [7,15]:5% < 下沿7% → 衰减(<1);10% 落健康带 → 满分 1.0;
+    # 20% > 上沿15% → 衰减(<1)。
+    assert rules.turnover_health_score(10.0) == 1.0       # 健康带满分
+    assert rules.turnover_health_score(7.0) == 1.0        # 下沿含端点
+    assert rules.turnover_health_score(15.0) == 1.0       # 上沿含端点
+    assert 0.0 < rules.turnover_health_score(5.0) < 1.0   # 过低衰减
+    assert 0.0 < rules.turnover_health_score(20.0) < 1.0  # 过高衰减
     assert rules.turnover_health_score(0.0) == 0.0        # 无成交无共识
     assert rules.turnover_health_score(-1.0) == 0.0       # 负值兜底
-    assert rules.turnover_health_score(20.0) == 0.0       # 2×上沿及以上 → 0
+    assert rules.turnover_health_score(30.0) == 0.0       # 2×上沿及以上 → 0
     # 单调性:健康带外距离越远分越低
-    assert rules.turnover_health_score(11.0) > rules.turnover_health_score(14.0)
+    assert rules.turnover_health_score(16.0) > rules.turnover_health_score(20.0)
 
 
 def test_mv_elastic_score_boundaries():
-    # 10 亿(微盘<15)→ 0;50 亿(中小盘带)→ 满分;800 亿(超大盘>500)→ 0。
-    assert rules.mv_elastic_score(50.0) == 1.0            # 中小盘满分带
-    assert rules.mv_elastic_score(20.0) == 1.0            # 下沿含端点
-    assert rules.mv_elastic_score(200.0) == 1.0           # 上沿含端点
-    assert rules.mv_elastic_score(10.0) == 0.0            # 微盘 <15 → 0
+    # v1.3.1 改带 [50,500]/floor 30:20 亿(微盘<30)→ 0;100 亿(中小盘带)→ 满分;
+    # 800 亿(超大盘>500)→ 0。
+    assert rules.mv_elastic_score(100.0) == 1.0           # 中小盘满分带
+    assert rules.mv_elastic_score(50.0) == 1.0            # 下沿含端点
+    assert rules.mv_elastic_score(500.0) == 1.0           # 上沿含端点
+    assert rules.mv_elastic_score(20.0) == 0.0            # 微盘 <30 → 0
     assert rules.mv_elastic_score(800.0) == 0.0           # 超大盘 >500 → 0
-    assert 0.0 < rules.mv_elastic_score(300.0) < 1.0      # 上行衰减带
-    assert 0.0 < rules.mv_elastic_score(17.0) < 1.0       # 下行衰减带
+    # 上沿(500)与超大盘阈(500)重合 → 上行衰减 span=0,越过 500 立即 0(无衰减带)
+    assert rules.mv_elastic_score(501.0) == 0.0
+    assert 0.0 < rules.mv_elastic_score(40.0) < 1.0       # 下行衰减带(30~50)
     # 缺失/未知市值 → 中性 0.5(不当微盘惩罚,plan §4.1 🔵)
     assert rules.mv_elastic_score(0.0) == 0.5
     assert rules.mv_elastic_score(-5.0) == 0.5
@@ -346,6 +390,60 @@ def test_fetch_snapshot_maps_moneyflow_dc_net_amount(monkeypatch):
     assert row.net_mf_3d == pytest.approx(20000.0)  # 近 3 日合计(万元)= 2 亿
 
 
+# —— fetch_market_snapshot:volume_ratio(官方量比)读取 + NaN 安全守卫(v1.3.1 A2 重要#4)——
+
+def test_fetch_snapshot_reads_volume_ratio():
+    """daily_basic.volume_ratio 正常读取,写入 StockRow.volume_ratio。"""
+    from app.screen.fetch import _safe_float
+    assert _safe_float(2.5) == 2.5
+    assert _safe_float(None) == 0.0
+    assert _safe_float(None, 1.0) == 1.0
+
+
+def test_safe_float_guards_nan():
+    """pd.isna 的 NaN 值 → 安全返回 default(重要#4:`x or 0.0` 拦不住 NaN,这里必须真守住)。"""
+    import math
+    from app.screen.fetch import _safe_float
+    nan = float("nan")
+    assert math.isnan(nan)                 # 前提:nan 确实是 float nan
+    assert _safe_float(nan, 0.0) == 0.0     # 必须守住,不能透出 nan
+    assert _safe_float(nan) != nan          # 绝不能是 nan(nan != nan 恒 True,只为强调语义)
+    import pandas as pd
+    assert _safe_float(pd.NA, 0.0) == 0.0   # pandas 专属 NA 同样守住
+
+
+def test_fetch_snapshot_volume_ratio_nan_defaults_zero_and_gets_coarse_filtered(monkeypatch):
+    """volume_ratio=NaN(模拟 Tushare 缺值)→ 读入 0.0,该票粗筛按 <VOL_RATIO_MIN 淘汰
+    (不会放行进 rank_score 毒化 min-max;重要#4 门禁用例)。
+    """
+    import math
+    td = "20260626"
+    basic = [{"ts_code": "600000.SH", "close": 10.0, "turnover_rate": 3.0,
+              "total_mv": 500_000.0, "volume_ratio": math.nan}]
+    daily = {"20260626": [{"ts_code": "600000.SH", "close": 10.0,
+                           "vol": 1000.0, "pre_close": 9.8}]}
+    _patch_fetch(monkeypatch, basic=basic, dc_by_date={}, daily_by_date=daily)
+
+    snap = fetch_market_snapshot(td)
+    assert snap.ok is True
+    row = next(r for r in snap.rows if r.code == "600000")
+    assert row.volume_ratio == 0.0   # NaN 安全兜底为 0(非 nan),粗筛按 0<VOL_RATIO_MIN 会淘汰
+
+
+def test_fetch_snapshot_volume_ratio_present_maps_correctly(monkeypatch):
+    """volume_ratio 正常有值 → 如实写入 StockRow.volume_ratio。"""
+    td = "20260626"
+    basic = [{"ts_code": "600000.SH", "close": 10.0, "turnover_rate": 3.0,
+              "total_mv": 500_000.0, "volume_ratio": 2.3}]
+    daily = {"20260626": [{"ts_code": "600000.SH", "close": 10.0,
+                           "vol": 1000.0, "pre_close": 9.8}]}
+    _patch_fetch(monkeypatch, basic=basic, dc_by_date={}, daily_by_date=daily)
+
+    snap = fetch_market_snapshot(td)
+    row = next(r for r in snap.rows if r.code == "600000")
+    assert row.volume_ratio == pytest.approx(2.3)
+
+
 def test_fetch_snapshot_moneyflow_dc_no_permission_degrades(monkeypatch):
     """moneyflow_dc 无权限(2000 积分)→ 资金面退化为 0,daily_basic 在则快照仍 ok 不崩。"""
     td = "20260626"
@@ -449,33 +547,54 @@ def test_fetch_snapshot_pct_chg_no_false_jump_on_ex_dividend_day(monkeypatch):
 # —— pipeline:黑名单/高位/粗筛/排序/截断(喂样例,免联网)——————————————
 
 def _sr(code, name, industry, vol_mult=2.0, mf3=100.0, mf_today=10.0,
-        new_high=True, above_ma=True, pct60=10.0, close=10.0, turnover=5.0, pct_chg=3.0):
+        new_high=True, above_ma=True, pct60=10.0, close=10.0, turnover=5.0, pct_chg=3.0,
+        vol_ratio=None, pos_health=0.8, breakout=False):
+    """测试用 StockRow 工厂。v1.3.1 A2:粗筛/排序改用 volume_ratio(官方量比),
+    vol_ratio 缺省时镜像 vol_mult(沿用旧调用点"vol_mult 控制放量强弱"的测试意图,
+    免逐个调用点改写);vol_multiple 仍保留(展示口径解耦,建议#10)。
+    pos_health 缺省 0.8(中性偏高,不为 0 免打偏排序);breakout 缺省 False。
+    """
     return StockRow(
         code=code, name=name, industry=industry, close=close, pct_chg=pct_chg,
         turnover=turnover, net_mf_amount=mf_today, net_mf_3d=mf3,
-        vol_multiple=vol_mult, pct_60d=pct60, new_high_20d=new_high, above_ma20=above_ma,
+        vol_multiple=vol_mult,
+        volume_ratio=vol_ratio if vol_ratio is not None else vol_mult,
+        pct_60d=pct60, new_high_20d=new_high, above_ma20=above_ma,
+        pos_health=pos_health, breakout_ok=breakout,
     )
 
 
-def test_pipeline_blacklist_and_high_excluded():
+def test_pipeline_blacklist_kept_high_position_no_longer_excluded():
+    """黑名单仍硬排除;v1.3.1 起高位线 ≥100% 不再排除,只标 warnLevel=high(plan §4.1)。"""
     rows = [
         _sr("600000", "干净A", "银行"),                       # 合格
-        _sr("300001", "创业板", "电池"),                      # 黑名单代码
-        _sr("600519", "贵州茅台", "白酒"),                    # 白酒黑名单
-        _sr("600002", "高位B", "钢铁", pct60=150.0),          # 高位 ≥100 排除
+        _sr("300001", "创业板", "电池"),                      # 黑名单代码,仍排除
+        _sr("600519", "贵州茅台", "白酒"),                    # 白酒黑名单,仍排除
+        _sr("600002", "高位B", "钢铁", pct60=150.0),          # 高位 ≥100:v1.3.1 不再排除
         _sr("600003", "warnC", "有色", pct60=70.0),           # ≥50 warn 不排除
     ]
     snap = MarketSnapshot(trade_date="2026-05-06", rows=rows)
     out = pipeline.build_candidates(snap)
     codes = [c["code"] for c in out]
     assert "600000" in codes and "600003" in codes
-    assert "300001" not in codes and "600519" not in codes and "600002" not in codes
-    # warn 降级:600003 warn 非空
+    assert "300001" not in codes and "600519" not in codes   # 黑名单仍排除
+    assert "600002" in codes   # 高位不再排除(关键回归断言)
+
+    # warn 降级:600003(70%)warn 非空,warnLevel=amber
     warnc = next(c for c in out if c["code"] == "600003")
     assert warnc.get("warn")
-    # 干净 A 无 warn
+    assert warnc.get("warnLevel") == "amber"
+
+    # 600002(150%)warn 非空且 warnLevel=high(红级,重要#6)
+    high = next(c for c in out if c["code"] == "600002")
+    assert high.get("warn")
+    assert "极高位" in high["warn"]
+    assert high.get("warnLevel") == "high"
+
+    # 干净 A 无 warn、无 warnLevel(省略键)
     cleana = next(c for c in out if c["code"] == "600000")
     assert cleana.get("warn") is None
+    assert "warnLevel" not in cleana
 
 
 def test_pipeline_coarse_filters():

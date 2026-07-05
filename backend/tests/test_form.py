@@ -230,3 +230,99 @@ def test_had_limit_up_respects_lookback_window(monkeypatch):
     vols = [1000.0] * len(closes)
     result = compute_form(closes, vols)
     assert result.had_limit_up is False   # 涨停在窗口外(index5 > 窗口上界3)
+
+
+# —— v1.3.1 A1 信号:pos_health(位置健康,距60日高点)————————————————————
+
+def test_pos_health_near_high():
+    """今日收盘贴近60日最高收盘 → pos_health 接近 1。"""
+    closes = [99.0] + [100.0] * 25   # 60日最高=100,今日99 → 0.99
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols)
+    assert result.pos_health == pytest.approx(0.99)
+
+
+def test_pos_health_far_from_high():
+    """今日收盘远离60日最高收盘 → pos_health 偏小。"""
+    closes = [30.0] + [100.0] * 25   # 60日最高=100,今日30 → 0.30
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols)
+    assert result.pos_health == pytest.approx(0.30)
+
+
+def test_pos_health_data_insufficient_under_20_days_zero():
+    """数据不足(len<20)→ pos_health=0.0(建议#9:防次新股贴短命高点白拿满权)。"""
+    closes = [99.0] + [100.0] * 18   # 共 19 天 < 20
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols)
+    assert result.pos_health == 0.0
+
+
+def test_pos_health_exactly_20_days_computes():
+    """恰好 20 天(边界含)→ 正常计算,不退化 0。"""
+    closes = [99.0] + [100.0] * 19   # 共 20 天
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols)
+    assert result.pos_health == pytest.approx(0.99)
+
+
+# —— v1.3.1 A1 信号:breakout_ok(横盘突破,信号7)——————————————————————————
+
+def test_breakout_ok_narrow_range_then_today_breaks_out_with_volume():
+    """窄横盘 + 今日大阳线突破24日上沿 + 量比达标 → True(重要#5 门禁用例)。
+
+    按错误公式(振幅窗口含今日)这条会 False:今日=110 会被纳入 max,振幅变成
+    (110-98)/98≈12.2%<15%仍窄、但"今日突破区间上沿"的上沿本身被今日污染,
+    今日不会 > 含自己的 max → False。正确实现(振幅在 closes[1:25],不含今日)
+    应判 True:closes[1:25] 全在 [98,100] 窄幅内,今日 110 突破该区间上沿。
+    """
+    # closes[1:25] 24 天窄幅 [98,100.5],今日(closes[0])放量大阳线 110 突破上沿
+    window = [99.0, 100.5, 98.0, 100.0] * 6   # 24 个数,窄幅
+    closes = [110.0] + window
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols, volume_ratio=2.0)   # 量比达标(>=1.5)
+    assert result.breakout_ok is True
+
+
+def test_breakout_ok_false_when_range_not_narrow():
+    """近24日振幅过宽(≥15%)→ False(即使今日突破 + 量比达标)。"""
+    window = [80.0, 100.0, 85.0, 95.0] * 6   # 振幅 (100-80)/80=25% 远超 15%
+    closes = [110.0] + window
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols, volume_ratio=2.0)
+    assert result.breakout_ok is False
+
+
+def test_breakout_ok_false_when_today_does_not_break_out():
+    """今日未突破24日区间上沿 → False(即使窄幅 + 量比达标)。"""
+    window = [99.0, 100.5, 98.0, 100.0] * 6   # 窄幅,上沿 100.5
+    closes = [100.0] + window   # 今日 100 未突破 100.5
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols, volume_ratio=2.0)
+    assert result.breakout_ok is False
+
+
+def test_breakout_ok_false_when_volume_ratio_missing():
+    """缺 volume_ratio(None,默认)→ False(向后兼容旧调用点)。"""
+    window = [99.0, 100.5, 98.0, 100.0] * 6
+    closes = [110.0] + window
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols)   # 不传 volume_ratio
+    assert result.breakout_ok is False
+
+
+def test_breakout_ok_false_when_volume_ratio_below_min():
+    """量比不达标(<BREAKOUT_VOL_RATIO_MIN)→ False。"""
+    window = [99.0, 100.5, 98.0, 100.0] * 6
+    closes = [110.0] + window
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols, volume_ratio=1.0)   # <1.5
+    assert result.breakout_ok is False
+
+
+def test_breakout_ok_false_when_data_insufficient_under_25_days():
+    """数据不足 25 日(closes[1:25] 拿不满)→ False,不崩。"""
+    closes = [110.0] + [100.0] * 20   # 总共 21 天,closes[1:25] 只有 20 个
+    vols = [1000.0] * len(closes)
+    result = compute_form(closes, vols, volume_ratio=2.0)
+    assert result.breakout_ok is False

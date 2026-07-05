@@ -56,11 +56,12 @@ def _fmt_turnover(pct: float) -> str:
 def passes_coarse(sr: StockRow) -> bool:
     """粗筛宽条件(经验默认值,plan §4.1;**非生死阈,宁松勿紧**)。
 
-    放量 ≥ VOL_MULTIPLE_MIN 且 主力近 3 日净流入 > 0 且 当日非大幅净流出 且
+    量比(官方 daily_basic.volume_ratio)≥ VOL_RATIO_MIN(v1.3.1 A2 改口径,旧用
+    自算放量倍数)且 主力近 3 日净流入 > 0 且 当日非大幅净流出 且
     (创 20 日新高 或 站 20 日均线 任一即可)。任一不满足则粗筛淘汰。
     门槛宽:把"值不值得进"留给 LLM 深判,这里只挡明显不相关的票。
     """
-    if sr.vol_multiple < rules.VOL_MULTIPLE_MIN:
+    if sr.volume_ratio < rules.VOL_RATIO_MIN:
         return False
     if sr.net_mf_3d <= 0:
         return False
@@ -77,22 +78,19 @@ def _sector_of(sr: StockRow) -> str:
 
 
 def build_candidates(snapshot: MarketSnapshot) -> List[Dict[str, Any]]:
-    """对快照执行 黑名单 → 高位线 → 粗筛 → 排序(全量),产候选 dict 列表(未截断)。
+    """对快照执行 黑名单 → 粗筛 → 排序(全量),产候选 dict 列表(未截断)。
 
-    截断在端点运行时做(v1.3.0 起固定 rules.CANDIDATE_LIMIT=20,不再随 free_slots
-    变化、不再满仓闭门);这里产**已排序的全部合格候选**并打 rank(1 起),端点再
-    prefix(rules.CANDIDATE_LIMIT)。
+    v1.3.1 A1/A2:高位线 ≥100% 硬排除已删(不再有单独的"高位线"过滤阶段,只在
+    展示层标注 warnLevel,见 _merge_warn/_warn_level)。截断在端点运行时做
+    (v1.3.0 起固定 rules.CANDIDATE_LIMIT=20,不再随 free_slots 变化、不再满仓闭门);
+    这里产**已排序的全部合格候选**并打 rank(1 起),端点再 prefix(rules.CANDIDATE_LIMIT)。
     """
     survivors: List[StockRow] = []
     for sr in snapshot.rows:
         # 黑名单硬排除(二元)
         if rules.is_blacklisted(sr.code, sr.name, sr.industry):
             continue
-        # 高位线(二元):≥100% 排除
-        verdict = rules.high_position_verdict(sr.pct_60d)
-        if verdict == "exclude":
-            continue
-        # 粗筛宽条件(经验默认值)
+        # 粗筛宽条件(经验默认值);高位线不再在此过滤,只在 warn 分级展示(v1.3.1 A1)
         if not passes_coarse(sr):
             continue
         survivors.append(sr)
@@ -100,13 +98,15 @@ def build_candidates(snapshot: MarketSnapshot) -> List[Dict[str, Any]]:
     if not survivors:
         return []
 
-    # 机械排序(阶段3.1 八因子:放量权重最大 + VWAP/市值弹性/近期活跃/换手健康 + 单日软闸罚项)
+    # 机械排序(v1.3.1 九因子:量比权重最大 + 位置健康/换手健康/VWAP/横盘突破/市值弹性/
+    # 近期活跃/资金面 + 单日软闸罚项)
     scores = rules.rank_score(
-        vol_multiples=[s.vol_multiple for s in survivors],
+        vol_ratios=[s.volume_ratio for s in survivors],          # 官方量比(v1.3.1 改口径)
         fund_3d=[s.net_mf_rate_3d for s in survivors],  # 相对口径(占成交额%),免大盘股偏置
         turnovers=[s.turnover for s in survivors],
-        pct_60ds=[(s.pct_60d if s.pct_60d is not None else 0.0) for s in survivors],
+        pos_healths=[s.pos_health for s in survivors],           # 位置健康(v1.3.1 新增)
         vwap_oks=[s.vwap_ok for s in survivors],                 # 信号1
+        breakout_oks=[s.breakout_ok for s in survivors],         # 信号7(v1.3.1 新增)
         total_mv_yis=[s.total_mv_yi for s in survivors],         # 信号4
         actives=[s.had_limit_up for s in survivors],             # 信号5
         day_pcts=[s.pct_chg for s in survivors],                 # 信号6(今日涨幅)
@@ -122,7 +122,7 @@ def build_candidates(snapshot: MarketSnapshot) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for i, (sr, _raw, disp) in enumerate(ranked, start=1):
         warn = _merge_warn(sr)
-        out.append({
+        cand: Dict[str, Any] = {
             "rank": i,
             "name": sr.name,
             "code": sr.code,
@@ -130,13 +130,18 @@ def build_candidates(snapshot: MarketSnapshot) -> List[Dict[str, Any]]:
             "tag": "放量突破" if sr.new_high_20d else "站上均线",
             "price": round(sr.close, 2),
             "chg": _fmt_chg(sr.pct_chg),
-            "volMultiple": _fmt_vol_multiple(sr.vol_multiple),
+            "volMultiple": _fmt_vol_multiple(sr.vol_multiple),   # 展示用自算放量倍数(解耦不变)
             "volPct": _vol_pct(sr.vol_multiple),
             "flow": _fmt_flow(sr.net_mf_3d),
             "turnover": _fmt_turnover(sr.turnover),
             "warn": warn,   # None → 客户端不降级
             "score": disp,  # 阶段3.1:当日相对分(展示,不参与排序/截断)
-        })
+        }
+        # v1.3.1 A2.5:warnLevel(≥100%→"high",其余 warn 场景→"amber",无→省略键)
+        level = _warn_level(sr)
+        if level:
+            cand["warnLevel"] = level
+        out.append(cand)
     return out
 
 
@@ -146,12 +151,27 @@ def _merge_warn(sr: StockRow) -> Optional[str]:
     两条都命中 → 拼接展示("；"分隔);只命中一条 → 该条;都不命中 → None。
     plan §4.1:warn 仍是 Optional[str],客户端 CandidateRow 已有琥珀降级逻辑,不改契约。
     """
-    high = rules.high_warn_text(sr.pct_60d)          # ≥50% 且 <100% → 非空
+    high = rules.high_warn_text(sr.pct_60d)          # ≥50%(含≥100%) → 非空(v1.3.1 A1 改)
     surge = rules.day_surge_warn_text(sr.pct_chg)    # 今日 ≥9% → 非空
     parts = [w for w in (high, surge) if w]
     if not parts:
         return None
     return "；".join(parts)
+
+
+def _warn_level(sr: StockRow) -> Optional[str]:
+    """warnLevel 分级(v1.3.1 A2.5):≥100% 高位 → 'high'(红级);[50,100%) → 'amber'。
+
+    高位分级与单日暴涨 warn 并列出现时,级别取最高(有 high 则 high,否则有 amber
+    才 amber,否则 None)——见 plan §4.1 第4层:high_position_warn_level 已是最高优先级
+    的红/琥珀,单日暴涨软闸仅在无高位分级时才把级别抬到 amber。
+    """
+    high_level = rules.high_warn_level(sr.pct_60d)   # 'high' / 'amber' / None
+    if high_level:
+        return high_level
+    if rules.day_surge_warn_text(sr.pct_chg):
+        return "amber"
+    return None
 
 
 def _normalize_scores(raw_scores: List[float]) -> List[int]:
