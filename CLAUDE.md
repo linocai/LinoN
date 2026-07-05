@@ -104,7 +104,7 @@
 > token/SSH/ECS 部署/systemd 服务/真机 APNs 均已就绪(详见 PROJECT_PLAN §3),原"待联调"里
 > Tushare 真拉、`sync.sh` rsync 到 ECS、`linon.service` enable/start 三条均已完成、已删。仅剩:
 
-- 实时价真源**联网+盘中**复测:监控硬线用的新浪/腾讯实时源本期只验过收盘快照 + 样例报文单测,**未在交易时段真盘中复测**(盘后源返回上一交易日快照)。
+- 实时价真源**联网+盘中**复测:监控硬线用的新浪/腾讯实时源本期只验过收盘快照 + 样例报文单测,**未在交易时段真盘中复测**(盘后源返回上一交易日快照)。**v1.4 Phase E 用户拍板取消此项自动冒烟**(2026-07-05 晚,改由用户周一 7/6 实盘使用时直接验证),冒烟脚本 `backend/scripts/smoke_intraday.py` 已就绪备用(非交易时段验证过优雅退出),欠账如实保留、待实盘验证。
 
 ## 阶段2 track E:候选 + 深析客户端(已落地)
 
@@ -122,3 +122,11 @@
 - **computer-use 本机全屏 Dock 守卫(环境级,加重版)**:本轮 macOS App **及 iOS Simulator** 的 `left_click`/drag **全屏一律被判 "程序坞"**(连菜单栏 y=8、居中弹窗都拦),非位置相关——比 track B 记录的更彻底;`screenshot`/`zoom`/`mouse_move`/`key` 仍可用。AppleScript 移窗需"辅助功能"权限(未授,失败)。**可视核对退路**=`ImageRenderer` 离屏快照(`LinoNTests/SnapshotRenderTests.swift`,产物落 sim 沙盒 `tmp/`,`simctl` 路径拷出)。**`ImageRenderer` 坑**:不渲染 `ScrollView` 内容(产出空白页),要核对 ScrollView 内组件须**单独渲染组件本体(裹 VStack 而非 ScrollView)**;非 ScrollView 包裹的卡(DeepAnalysisCard / ClosedEmptyCard / 顶栏 / composer)渲染正常。
 - **iOS 候选行布局 ≠ macOS**(照各自设计稿):iOS 行 = rank chip + 弹性中列(名/警告·板块/[放量条54px·放量·主力])+ 右侧价/涨/chevron 竖排;macOS 行 = 横向多列(#/股票/现价涨幅/放量条·倍数/主力/换手/深析按钮)。**别把 macOS 横列套到 iOS**(iPhone 宽度放不下会把名字挤成省略号)。
 - **本地真数据联调**:`uvicorn` 起 dev(`ENABLE_MONITOR=0 DB_PATH=/tmp/xxx.db`,避动真 DB)→ 客户端 dev 指 `127.0.0.1:8001`(iOS Simulator 也走 host loopback)→ token 注入 `defaults write top.linotsai.linon LN_API_TOKEN <tok>`(macOS App / `simctl spawn <dev> defaults write` for sim)。Tushare 聚合数据**发布有几天到约一周延迟、逐步补齐**(订正旧"滞后到 2026-05-06"误判;东财 `moneyflow_dc` 6000 积分给到上一交易日),`refresh` 拉的基准日若 EOD 未出会 count=0 非 degraded;可直接 `store.upsert_candidates(td, rows, db_path=...)` 种样例验渲染。深析卡 fund.text 会按真 daily 数据给真 verdict(种的样例价仅占位)。
+
+## v1.4:盘中上下文关键口径(已完工)
+
+- `app/data/intraday.py` 是纯函数层(不自拉价、不联网);`_is_intraday_window(now)` 是本 feature **唯一**时段真值源(交易日且 09:30≤now<15:00,**含午休**)——**禁止复用 `loop._is_trading_now`**(它午休判 False,会让跨午休折算/closed 分支变死码)。
+- VWAP = `amount/(volume×100)`(**元/股**,realtime 归一后 amount=元、volume=手);`app/screen/form.py` 的 ×1000 系数是千元/手口径,**勿照抄**。
+- early 阈值 60min(非 30):A 股早盘量能前置,10:30 前折算系统性偏高、方向恰好利于怂恿追高,故保守。
+- prev5 均量 = `vols[:5]`(T-1..T-5 字面口径),经 `_PREV5_CACHE(code, trade_date, today)` 进程内缓存,键含 `today` 防跨天污染。
+- 盘中上下文只影响 coach/chat 的 LLM prompt 文本,**不改 verdict/advice 二元派生逻辑**。
