@@ -210,18 +210,31 @@ def test_turnover_health_score_boundaries():
 
 
 def test_mv_elastic_score_boundaries():
-    # v1.3.1 改带 [50,500]/floor 30:20 亿(微盘<30)→ 0;100 亿(中小盘带)→ 满分;
-    # 800 亿(超大盘>500)→ 0。
+    # v1.3.1 改带 [50,500]/floor 30:20 亿(微盘<30)→ 0;100 亿(中小盘带)→ 满分。
+    # 审后修复:MV_MEGA_CEIL 500→1500(原与 mv_hi=500 重合、衰减带 span=0 退化成硬
+    # 台阶,现拉开成真正的线性衰减带 [500,1500])。
     assert rules.mv_elastic_score(100.0) == 1.0           # 中小盘满分带
     assert rules.mv_elastic_score(50.0) == 1.0            # 下沿含端点
     assert rules.mv_elastic_score(500.0) == 1.0           # 上沿含端点
     assert rules.mv_elastic_score(20.0) == 0.0            # 微盘 <30 → 0
-    assert rules.mv_elastic_score(800.0) == 0.0           # 超大盘 >500 → 0
-    # 上沿(500)与超大盘阈(500)重合 → 上行衰减 span=0,越过 500 立即 0(无衰减带)
-    assert rules.mv_elastic_score(501.0) == 0.0
+    assert rules.mv_elastic_score(1500.0) == 0.0          # 衰减终点 → 0
+    assert rules.mv_elastic_score(2000.0) == 0.0          # 超过衰减终点恒 0
+    # 500亿(mv_hi)=1.0,1000亿(衰减带中点)≈0.5,1500亿(mv_mega_ceil)=0,
+    # >1500 恒 0(审后修复用户新增验收点)。
+    assert rules.mv_elastic_score(1000.0) == pytest.approx(0.5)
     assert 0.0 < rules.mv_elastic_score(40.0) < 1.0       # 下行衰减带(30~50)
+    assert 0.0 < rules.mv_elastic_score(800.0) < 1.0      # 上行衰减带(500~1500)内部
     # 缺失/未知市值 → 中性 0.5(不当微盘惩罚,plan §4.1 🔵)
     assert rules.mv_elastic_score(0.0) == 0.5
+
+
+def test_mv_elastic_score_respects_cfg_mv_mega_ceil():
+    """cfg 传入的 mv_mega_ceil 真实改变上行衰减终点(证穿参生效)。"""
+    cfg = dict(rules.DEFAULT_SCREEN_CONFIG)
+    cfg["mv_mega_ceil"] = 1000.0   # 收窄衰减带(默认 1500 → 1000)
+    assert rules.mv_elastic_score(1000.0, cfg) == 0.0
+    assert rules.mv_elastic_score(1500.0, cfg) == 0.0     # 已过收窄后的终点,仍 0
+    assert 0.0 < rules.mv_elastic_score(750.0, cfg) < 1.0
     assert rules.mv_elastic_score(-5.0) == 0.5
 
 

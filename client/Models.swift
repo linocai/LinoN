@@ -222,6 +222,7 @@ enum ScreenConfigSpec {
         .init(key: "turnover_hi", label: "换手健康带上限", category: .threshold, range: 0...50, step: 0.5, isInteger: false, unit: "%"),
         .init(key: "mv_lo", label: "市值弹性带下限", category: .threshold, range: 0...2000, step: 5, isInteger: false, unit: "亿"),
         .init(key: "mv_hi", label: "市值弹性带上限", category: .threshold, range: 0...2000, step: 5, isInteger: false, unit: "亿"),
+        .init(key: "mv_mega_ceil", label: "市值衰减上限(亿)", category: .threshold, range: 500...5000, step: 50, isInteger: false, unit: "亿"),
         .init(key: "mv_floor", label: "市值微盘 floor", category: .threshold, range: 0...2000, step: 5, isInteger: false, unit: "亿"),
         .init(key: "breakout_range_max", label: "横盘振幅上限", category: .threshold, range: 0...1, step: 0.01, isInteger: false, unit: ""),
         .init(key: "breakout_vol_ratio_min", label: "突破量比下限", category: .threshold, range: 1...5, step: 0.1, isInteger: false, unit: ""),

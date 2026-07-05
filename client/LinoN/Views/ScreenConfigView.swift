@@ -103,6 +103,13 @@ struct ScreenConfigView: View {
 
     // MARK: - 保存 / 恢复默认
 
+    /// 加载中 / 保存中 / 配置为空(`[:]`,加载失败或尚未加载完成)时禁用保存/恢复默认——
+    /// 否则空态点保存会把 `PUT {config:{}}` 当成"恢复默认"提交,意外清空用户已存的
+    /// 配置增量(审后修复 🟡#2)。
+    private var actionsDisabled: Bool {
+        model.screenConfigLoading || model.screenConfigSaving || model.screenConfig.isEmpty
+    }
+
     private var actionSection: some View {
         Section {
             Button {
@@ -113,14 +120,14 @@ struct ScreenConfigView: View {
                     Text("保存")
                 }
             }
-            .disabled(model.screenConfigSaving)
+            .disabled(actionsDisabled)
 
             Button(role: .destructive) {
                 Task { await model.restoreDefaultScreenConfig() }
             } label: {
                 Text("恢复默认")
             }
-            .disabled(model.screenConfigSaving)
+            .disabled(actionsDisabled)
 
             if let updatedAt = model.screenConfigUpdatedAt {
                 LabeledContent("最近保存") {

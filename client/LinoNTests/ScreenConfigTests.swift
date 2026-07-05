@@ -2,9 +2,9 @@
 //  ScreenConfigTests.swift
 //  LinoN — v1.3.1 Phase B3:客户端选股配置调参屏单测
 //
-//  覆盖:ScreenConfigSpec 键集完整性(21 键=9 权重+12 阈值,与后端 SCREEN_CONFIG_SPEC 对齐)、
-//  GET/PUT 响应 DTO 编解码(camelCase 扁平 dict)、AppModel 正权和派生、恢复默认语义
-//  (PUT 空 dict)、保存后不自动刷新候选(产品决策)。
+//  覆盖:ScreenConfigSpec 键集完整性(22 键=9 权重+13 阈值,与后端 SCREEN_CONFIG_SPEC 对齐,
+//  含审后修复新增 mv_mega_ceil 第 22 键)、GET/PUT 响应 DTO 编解码(camelCase 扁平 dict)、
+//  AppModel 正权和派生、恢复默认语义(PUT 空 dict)、保存后不自动刷新候选(产品决策)。
 //
 
 import XCTest
@@ -14,11 +14,12 @@ import XCTest
 
 final class ScreenConfigSpecTests: XCTestCase {
 
-    /// 21 键 = 9 权重 + 12 阈值,键名与后端 SCREEN_CONFIG_SPEC 逐字对齐(plan §4 config 形状表)。
-    func testAllFieldsCountIs21() {
+    /// 22 键 = 9 权重 + 13 阈值,键名与后端 SCREEN_CONFIG_SPEC 逐字对齐(plan §4 config 形状表
+    /// + 审后修复新增 mv_mega_ceil)。
+    func testAllFieldsCountIs22() {
         XCTAssertEqual(ScreenConfigSpec.weightFields.count, 9)
-        XCTAssertEqual(ScreenConfigSpec.thresholdFields.count, 12)
-        XCTAssertEqual(ScreenConfigSpec.allFields.count, 21)
+        XCTAssertEqual(ScreenConfigSpec.thresholdFields.count, 13)
+        XCTAssertEqual(ScreenConfigSpec.allFields.count, 22)
     }
 
     func testWeightKeysMatchBackendSpec() {
@@ -30,9 +31,18 @@ final class ScreenConfigSpecTests: XCTestCase {
     func testThresholdKeysMatchBackendSpec() {
         let keys = Set(ScreenConfigSpec.thresholdFields.map(\.key))
         XCTAssertEqual(keys, ["vol_ratio_min", "turnover_lo", "turnover_hi", "mv_lo", "mv_hi",
-                              "mv_floor", "breakout_range_max", "breakout_vol_ratio_min",
-                              "day_outflow_floor", "day_surge_warn_pct",
+                              "mv_mega_ceil", "mv_floor", "breakout_range_max",
+                              "breakout_vol_ratio_min", "day_outflow_floor", "day_surge_warn_pct",
                               "active_lookback_days", "limit_up_pct"])
+    }
+
+    /// mv_mega_ceil(审后修复新增第 22 键)范围 [500,5000]、非整数(与后端 SPEC 一致)。
+    func testMvMegaCeilFieldRangeAndType() {
+        let f = ScreenConfigSpec.thresholdFields.first { $0.key == "mv_mega_ceil" }
+        XCTAssertNotNil(f)
+        XCTAssertEqual(f?.range, 500...5000)
+        XCTAssertEqual(f?.isInteger, false)
+        XCTAssertEqual(f?.unit, "亿")
     }
 
     /// day_surge 是负权罚项,不进"正权之和"提示——positiveWeightKeys 应只有 8 项。
@@ -175,5 +185,49 @@ final class ScreenConfigAppModelTests: XCTestCase {
         await m.loadScreenConfig()
         XCTAssertNil(m.toast)
         XCTAssertTrue(m.screenConfig.isEmpty)
+    }
+}
+
+// MARK: - 审后修复 🟡#2:保存/恢复默认按钮加载态/空态禁用守卫
+//
+// ScreenConfigView.actionsDisabled 是 private 计算属性(视图内),这里对镜像同款判定
+// 逻辑(loading || saving || screenConfig.isEmpty)在 AppModel 状态层面做断言,锁死
+// "空态/加载中/保存中 三态都应判定为禁用、只有非空+非加载+非保存才判定为可用"这一契约,
+// 防止未来重构悄悄改掉判定条件(如漏掉 isEmpty 分支导致空态误触发"恢复默认"清空用户配置)。
+
+@MainActor
+final class ScreenConfigActionsDisabledGuardTests: XCTestCase {
+
+    /// 与 ScreenConfigView.actionsDisabled 逐字对齐的判定表达式,供门禁断言复用。
+    private func actionsDisabled(_ m: AppModel) -> Bool {
+        m.screenConfigLoading || m.screenConfigSaving || m.screenConfig.isEmpty
+    }
+
+    func testDisabledWhenConfigEmpty() {
+        let m = AppModel()
+        XCTAssertTrue(m.screenConfig.isEmpty)
+        XCTAssertTrue(actionsDisabled(m), "空配置(未加载/加载失败)必须禁用,防 PUT {} 意外清空用户增量")
+    }
+
+    func testDisabledWhenLoading() {
+        let m = AppModel()
+        m.screenConfig = ["vol_ratio": 0.5]
+        m.screenConfigLoading = true
+        XCTAssertTrue(actionsDisabled(m))
+    }
+
+    func testDisabledWhenSaving() {
+        let m = AppModel()
+        m.screenConfig = ["vol_ratio": 0.5]
+        m.screenConfigSaving = true
+        XCTAssertTrue(actionsDisabled(m))
+    }
+
+    func testEnabledWhenLoadedAndIdle() {
+        let m = AppModel()
+        m.screenConfig = ["vol_ratio": 0.5]
+        m.screenConfigLoading = false
+        m.screenConfigSaving = false
+        XCTAssertFalse(actionsDisabled(m), "已加载非空配置且无进行中操作时应可点")
     }
 }

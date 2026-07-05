@@ -114,16 +114,17 @@ def test_get_screen_config_non_dict_json_degrades_to_empty(tmp_path):
 # ———————————————————————————————————————————————————————————————————
 
 def test_screen_config_spec_key_set():
-    """SCREEN_CONFIG_SPEC 键集 = 9 权重 + 12 阈值,共 21 键(plan §4 config 形状表)。"""
+    """SCREEN_CONFIG_SPEC 键集 = 9 权重 + 13 阈值,共 22 键(plan §4 config 形状表 +
+    审后修复新增 mv_mega_ceil 第 22 键)。"""
     weight_keys = {"vol_ratio", "pos_health", "turnover", "vwap", "breakout",
                    "mv_elastic", "active", "fund", "day_surge"}
     threshold_keys = {
-        "vol_ratio_min", "turnover_lo", "turnover_hi", "mv_lo", "mv_hi", "mv_floor",
-        "breakout_range_max", "breakout_vol_ratio_min", "day_outflow_floor",
+        "vol_ratio_min", "turnover_lo", "turnover_hi", "mv_lo", "mv_hi", "mv_mega_ceil",
+        "mv_floor", "breakout_range_max", "breakout_vol_ratio_min", "day_outflow_floor",
         "day_surge_warn_pct", "active_lookback_days", "limit_up_pct",
     }
     assert set(rules.SCREEN_CONFIG_SPEC.keys()) == weight_keys | threshold_keys
-    assert len(rules.SCREEN_CONFIG_SPEC) == 21
+    assert len(rules.SCREEN_CONFIG_SPEC) == 22
     for key, spec in rules.SCREEN_CONFIG_SPEC.items():
         assert spec["category"] in ("weight", "threshold")
         assert "type" in spec and "range" in spec and "default" in spec
@@ -145,6 +146,7 @@ def test_default_screen_config_equals_rules_constants():
     assert rules.DEFAULT_SCREEN_CONFIG["turnover_hi"] == rules.TURNOVER_HEALTHY_HI
     assert rules.DEFAULT_SCREEN_CONFIG["mv_lo"] == rules.MV_SMALL_CAP_LO
     assert rules.DEFAULT_SCREEN_CONFIG["mv_hi"] == rules.MV_SMALL_CAP_HI
+    assert rules.DEFAULT_SCREEN_CONFIG["mv_mega_ceil"] == rules.MV_MEGA_CEIL
     assert rules.DEFAULT_SCREEN_CONFIG["mv_floor"] == rules.MV_MICRO_FLOOR
     assert rules.DEFAULT_SCREEN_CONFIG["breakout_range_max"] == rules.BREAKOUT_RANGE_MAX
     assert rules.DEFAULT_SCREEN_CONFIG["breakout_vol_ratio_min"] == rules.BREAKOUT_VOL_RATIO_MIN
@@ -277,6 +279,75 @@ def test_validate_never_raises_on_garbage_input():
     assert out["mv_hi"] == rules.DEFAULT_SCREEN_CONFIG["mv_hi"]
     assert out["day_surge_warn_pct"] == rules.DEFAULT_SCREEN_CONFIG["day_surge_warn_pct"]
     assert out["active_lookback_days"] == rules.DEFAULT_SCREEN_CONFIG["active_lookback_days"]
+
+
+# ———————————————————————————————————————————————————————————————————
+# B2 审后修复 🟡#1:validate_screen_config 带内一致性收口(反转带整组回默认)
+# ———————————————————————————————————————————————————————————————————
+
+def test_validate_reversed_turnover_band_reverts_both_keys_to_default():
+    """换手带反转(lo=20 >= hi=10)→ turnover_lo/turnover_hi 双双回默认。"""
+    out = rules.validate_screen_config({"turnover_lo": 20.0, "turnover_hi": 10.0})
+    assert out["turnover_lo"] == rules.DEFAULT_SCREEN_CONFIG["turnover_lo"]
+    assert out["turnover_hi"] == rules.DEFAULT_SCREEN_CONFIG["turnover_hi"]
+
+
+def test_validate_reversed_mv_band_mv_lo_over_mv_hi_reverts_whole_group():
+    """市值带 mv_lo(600) > mv_hi(500) → mv_floor/mv_lo/mv_hi/mv_mega_ceil 整组回默认
+    (即便 mv_floor/mv_mega_ceil 本身在场且合法,也一并回退——最稳,不做局部修补)。"""
+    out = rules.validate_screen_config({
+        "mv_floor": 30.0, "mv_lo": 600.0, "mv_hi": 500.0, "mv_mega_ceil": 1500.0,
+    })
+    assert out["mv_floor"] == rules.DEFAULT_SCREEN_CONFIG["mv_floor"]
+    assert out["mv_lo"] == rules.DEFAULT_SCREEN_CONFIG["mv_lo"]
+    assert out["mv_hi"] == rules.DEFAULT_SCREEN_CONFIG["mv_hi"]
+    assert out["mv_mega_ceil"] == rules.DEFAULT_SCREEN_CONFIG["mv_mega_ceil"]
+
+
+def test_validate_reversed_mv_band_mv_hi_over_mega_ceil_reverts_whole_group():
+    """市值带 mv_hi(2000) > mv_mega_ceil(1500) → 四键整组回默认。"""
+    out = rules.validate_screen_config({
+        "mv_floor": 30.0, "mv_lo": 50.0, "mv_hi": 2000.0, "mv_mega_ceil": 1500.0,
+    })
+    assert out["mv_floor"] == rules.DEFAULT_SCREEN_CONFIG["mv_floor"]
+    assert out["mv_lo"] == rules.DEFAULT_SCREEN_CONFIG["mv_lo"]
+    assert out["mv_hi"] == rules.DEFAULT_SCREEN_CONFIG["mv_hi"]
+    assert out["mv_mega_ceil"] == rules.DEFAULT_SCREEN_CONFIG["mv_mega_ceil"]
+
+
+def test_validate_legal_bands_preserved_not_reset():
+    """合法带(换手/市值序都对)→ 原样保留,不被误重置。"""
+    out = rules.validate_screen_config({
+        "turnover_lo": 8.0, "turnover_hi": 16.0,
+        "mv_floor": 25.0, "mv_lo": 60.0, "mv_hi": 400.0, "mv_mega_ceil": 1200.0,
+    })
+    assert out["turnover_lo"] == 8.0
+    assert out["turnover_hi"] == 16.0
+    assert out["mv_floor"] == 25.0
+    assert out["mv_lo"] == 60.0
+    assert out["mv_hi"] == 400.0
+    assert out["mv_mega_ceil"] == 1200.0
+
+
+def test_validate_band_consistency_only_checked_when_all_band_keys_present():
+    """带一致性只在带的全部键都在场时检查——只提交 turnover_lo 单键(PUT 部分提交)
+    不误触发换手带检查,该键按逐键夹紧保留;mv 带同理(四键缺一不检查)。"""
+    out = rules.validate_screen_config({"turnover_lo": 8.0})
+    assert out["turnover_lo"] == 8.0
+    assert "turnover_hi" not in out   # 未提交,不出现(与建议#缺键行为一致)
+
+    out2 = rules.validate_screen_config({"mv_lo": 600.0, "mv_hi": 500.0})  # 反转但缺 floor/ceil
+    # 四键未全部在场,不触发带内检查,各键仍按各自 range 独立夹紧原值保留
+    assert out2["mv_lo"] == 600.0
+    assert out2["mv_hi"] == 500.0
+
+
+def test_resolve_reversed_turnover_band_reverts_to_default_after_merge():
+    """resolve 路径(全量后)同样跑带一致性:提交反转换手带 → resolve 后仍回默认,
+    不因走了 normalize_weights=True 分支就绕过带检查。"""
+    resolved = rules.resolve_screen_config({"turnover_lo": 20.0, "turnover_hi": 10.0})
+    assert resolved["turnover_lo"] == rules.DEFAULT_SCREEN_CONFIG["turnover_lo"]
+    assert resolved["turnover_hi"] == rules.DEFAULT_SCREEN_CONFIG["turnover_hi"]
 
 
 # ———————————————————————————————————————————————————————————————————
