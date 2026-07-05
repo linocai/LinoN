@@ -124,7 +124,6 @@ CANDIDATE_LIMIT = 20
 #   · 主力资金:东财 moneyflow_dc 近 3 日主力净额(net_amount,万元)合计 > 0(还在流入,不强求大幅)。
 #   · 当日非大幅净流出:当日主力净额 >= DAY_OUTFLOW_FLOOR(允许小幅流出,只挡崩盘出货)。
 #   · 形态:创 NEW_HIGH_DAYS 日新高 或 站上 MA_DAYS 日均线,任一即可(宽,任一满足)。
-VOL_MULTIPLE_MIN = 1.5            # 展示用自算放量倍数下限(历史沿用,展示口径不变)
 VOL_RATIO_MIN = 1.5               # 粗筛/排序用官方量比下限(v1.3.1,经验默认,可迭代,不卡生死)
 NEW_HIGH_DAYS = 20               # 创 N 日新高的 N(经验默认)
 MA_DAYS = 20                     # 站上 N 日均线的 N(经验默认)
@@ -299,7 +298,7 @@ WEIGHTS: Dict[str, float] = {
 #
 # 键集 = 9 权重(WEIGHTS 原样) + 13 阈值(各自对应上面已存在的 rules 常量;
 # mv_mega_ceil 为审后修复新增第 22 键,见下方注释)。
-# HIGH_EXCLUDE_PCT/HIGH_WARN_PCT/VOL_MULTIPLE_MIN/NEW_HIGH_DAYS/MA_DAYS/
+# HIGH_EXCLUDE_PCT/HIGH_WARN_PCT/NEW_HIGH_DAYS/MA_DAYS/
 # RECENT_FLOW_DAYS/SCORE_FLOOR **不在此键集**(plan §4 config 形状表未列,仍是
 # rules.py 常量单一源、不进配置/不可调)。
 #
