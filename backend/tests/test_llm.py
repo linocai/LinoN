@@ -344,3 +344,184 @@ def test_analyze_stock_degraded_form_has_vwap_placeholder(with_key):
         deepseek_fn=_fake_deepseek,
     )
     assert captured["ctx"]["form"]["vwap_ok"] == "—"
+
+
+# —— v1.4 Phase B:coach 盘中上下文注入(analyze_stock/chat_stock + prompt) ————————
+
+def test_fetch_form_returns_prev5_avg_vol(with_key):
+    """_fetch_form 顺带吐 prev5_avg_vol(手,不复权,vols[1:6] 均值),供盘中折算基准。"""
+    captured = {}
+
+    def _fake_deepseek(context):
+        captured["ctx"] = context
+        return deepseek.degraded_analysis("测试")
+
+    analyze.analyze_stock(
+        "603986", daily_fn=_ok_daily, moneyflow_fn=_ok_moneyflow,
+        sentiment_fn=lambda c: {"titles": [], "note": "", "degraded": False},
+        deepseek_fn=_fake_deepseek,
+        adj_factor_fn=_ok_adj_factor_flat,
+    )
+    # _ok_daily: i==0 时 vol=3000,其余(含 i=1..5)vol=1000 → prev5_avg_vol=1000.0
+    assert captured["ctx"]["form"]["prev5_avg_vol"] == 1000.0
+
+
+def test_fetch_form_degraded_prev5_avg_vol_zero():
+    """daily 拉取失败 → 占位 dict 的 prev5_avg_vol=0.0(不缺键,不崩)。"""
+    out = analyze._fetch_form("603986", _fail_fn)
+    assert out["prev5_avg_vol"] == 0.0
+    assert out["_degraded"] is True
+
+
+def _quote(**overrides):
+    from app.data.realtime import Quote
+    base = dict(
+        code="603986", name="兆易创新", price=101.0, pre_close=100.0,
+        open=100.5, high=102.0, low=99.5, limit_up=110.0, limit_down=90.0,
+        volume=2000.0, amount=101.0 * 2000.0 * 100.0,  # 真实比例 amount≈price×volume×100
+        ts="2026-07-06 10:30:00", source="sina",
+    )
+    base.update(overrides)
+    return Quote(**base)
+
+
+def test_analyze_stock_coach_intraday_injects_context(with_key):
+    """coach + is_trading + 有 Quote → context 含 intraday 键,快照字段齐全。"""
+    captured = {}
+
+    def _fake_deepseek(context):
+        captured["ctx"] = context
+        return deepseek.degraded_analysis("测试")
+
+    analyze.analyze_stock(
+        "603986", "兆易创新", "半导体", mode="coach", pnl_pct=1.0, trade_day=2,
+        daily_fn=_ok_daily, moneyflow_fn=_ok_moneyflow,
+        sentiment_fn=lambda c: {"titles": [], "note": "", "degraded": False},
+        deepseek_fn=_fake_deepseek, adj_factor_fn=_ok_adj_factor_flat,
+        intraday_quote=_quote(), is_trading=True,
+    )
+    intr = captured["ctx"].get("intraday")
+    assert intr is not None
+    assert intr["is_trading"] is True
+    assert intr["price"] == 101.0
+    assert intr["is_above_vwap"] is not None   # 真实比例 amount 应算出合法 VWAP
+
+
+def test_analyze_stock_coach_not_trading_omits_intraday(with_key):
+    """coach 但 is_trading=False(未传 True)→ context 不含 intraday 键。"""
+    captured = {}
+
+    def _fake_deepseek(context):
+        captured["ctx"] = context
+        return deepseek.degraded_analysis("测试")
+
+    analyze.analyze_stock(
+        "603986", mode="coach", pnl_pct=1.0, trade_day=2,
+        daily_fn=_ok_daily, moneyflow_fn=_ok_moneyflow,
+        sentiment_fn=lambda c: {"titles": [], "note": "", "degraded": False},
+        deepseek_fn=_fake_deepseek, adj_factor_fn=_ok_adj_factor_flat,
+        intraday_quote=_quote(), is_trading=False,
+    )
+    assert "intraday" not in captured["ctx"]
+
+
+def test_analyze_stock_candidate_mode_never_injects_intraday(with_key):
+    """candidate 模式即便误传 intraday_quote/is_trading=True 也不组装(候选无持仓语境)。"""
+    captured = {}
+
+    def _fake_deepseek(context):
+        captured["ctx"] = context
+        return deepseek.degraded_analysis("测试")
+
+    analyze.analyze_stock(
+        "603986", mode="candidate",
+        daily_fn=_ok_daily, moneyflow_fn=_ok_moneyflow,
+        sentiment_fn=lambda c: {"titles": [], "note": "", "degraded": False},
+        deepseek_fn=_fake_deepseek, adj_factor_fn=_ok_adj_factor_flat,
+        intraday_quote=_quote(), is_trading=True,
+    )
+    assert "intraday" not in captured["ctx"]
+
+
+def test_chat_stock_coach_intraday_injects_context():
+    """chat_stock coach 模式同 analyze_stock:盘中 + Quote → context 含 intraday。"""
+    captured = {}
+
+    def _fake_chat(messages, context):
+        captured["ctx"] = context
+        return {"reply": "x", "verdict": "观望"}
+
+    analyze.chat_stock(
+        "603986", [{"role": "user", "content": "还能拿吗"}], mode="coach",
+        pnl_pct=1.0, trade_day=2, chat_fn=_fake_chat,
+        daily_fn=_ok_daily, moneyflow_fn=_ok_moneyflow,
+        sentiment_fn=lambda c: {"titles": [], "note": "", "degraded": False},
+        adj_factor_fn=_ok_adj_factor_flat,
+        intraday_quote=_quote(), is_trading=True,
+    )
+    intr = captured["ctx"].get("intraday")
+    assert intr is not None and intr["is_trading"] is True
+
+
+def test_build_user_prompt_coach_intraday_block_and_fund_guardrail():
+    """coach + intraday 键 → prompt 含盘中块(区分标签)+ 资金约束句(建议#8)。"""
+    ctx = {
+        "mode": "coach", "code": "603986", "name": "兆易创新",
+        "pnl_pct": 3.2, "trade_day": 2,
+        "form": {"vol_multiple": 2.8}, "fund": {}, "news": {"note": "无"},
+        "fund_asof": "2026-07-03",
+        "intraday": {
+            "is_trading": True, "price": 101.0, "pre_close": 100.0,
+            "chg_pct": 1.0, "open_chg_pct": 0.5, "vwap": 99.0,
+            "is_above_vwap": True, "intraday_vol_ratio": 1.4,
+            "vol_note": "ok", "asof": "2026-07-03 10:30:00",
+        },
+    }
+    out = prompt_mod.build_user_prompt(ctx)
+    assert "盘中上下文" in out
+    assert "昨日 EOD 放量倍数" in out          # 与盘中量比标签必须显著区分(建议#8)
+    assert "盘中折算量比" in out
+    # T-1 EOD 资金约束句钉死措辞
+    assert "今日盘中资金未知" in out and "不得据此推测今日盘中资金动向" in out
+    # 盘中护栏句(含"早盘折算通常偏高")
+    assert "早盘折算通常偏高" in out
+
+
+def test_build_user_prompt_non_trading_no_intraday_block_but_has_fund_guardrail():
+    """非交易时段(context 无 intraday 键)→ 不渲染盘中块,但资金约束句照旧钉死。"""
+    ctx = {
+        "mode": "coach", "code": "603986", "name": "兆易创新",
+        "pnl_pct": 3.2, "trade_day": 2,
+        "form": {}, "fund": {}, "news": {"note": "无"}, "fund_asof": "2026-07-03",
+    }
+    out = prompt_mod.build_user_prompt(ctx)
+    assert "盘中上下文" not in out
+    assert "今日盘中资金未知" in out
+
+
+def test_build_user_prompt_candidate_mode_no_intraday_block():
+    """candidate 模式即便 context 意外带 intraday 键(理论不会发生)也不影响——
+    此处验证候选正常路径确无 intraday 键时不渲染盘中块(与 coach 对照)。"""
+    cand = prompt_mod.build_user_prompt({
+        "mode": "candidate", "code": "603986", "name": "兆易创新", "sector": "半导体",
+        "form": {}, "fund": {}, "news": {"note": "无"}, "fund_asof": "2026-07-03",
+    })
+    assert "盘中上下文" not in cand
+
+
+def test_build_chat_context_block_coach_intraday_block():
+    """build_chat_context_block(对话)同 build_user_prompt:盘中块 + 资金约束句。"""
+    ctx = {
+        "mode": "coach", "code": "603986", "name": "兆易创新",
+        "pnl_pct": 3.2, "trade_day": 2,
+        "form": {}, "fund": {}, "news": {"note": "无"}, "fund_asof": "2026-07-03",
+        "intraday": {
+            "is_trading": True, "price": 101.0, "pre_close": 100.0,
+            "chg_pct": 1.0, "open_chg_pct": 0.5, "vwap": 99.0,
+            "is_above_vwap": True, "intraday_vol_ratio": 1.4,
+            "vol_note": "ok", "asof": "2026-07-03 10:30:00",
+        },
+    }
+    out = prompt_mod.build_chat_context_block(ctx)
+    assert "盘中上下文" in out
+    assert "今日盘中资金未知" in out

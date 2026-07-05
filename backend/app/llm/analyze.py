@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 from app.calendar.trading_calendar import prev_trading_day
+from app.data import intraday
 from app.data import tushare_client as tc
+from app.data.realtime import Quote
 from app.llm import deepseek, sentiment
 from app.screen.form import compute_form, qfq_closes
 
@@ -64,11 +66,16 @@ def _fetch_form(
     if not res.ok or res.data is None or len(res.data) == 0:
         return {"close": "—", "pct_chg": "—", "vol_multiple": "—",
                 "new_high_20d": "—", "above_ma20": "—", "pct_60d": "—",
-                "turnover": "—", "vwap_ok": "—", "_degraded": True}
+                "turnover": "—", "vwap_ok": "—", "_degraded": True,
+                "prev5_avg_vol": 0.0}
     df = res.data.sort_values("trade_date", ascending=False).reset_index(drop=True)
     raw_closes = [float(x) for x in df["close"].tolist()]
     vols = [float(x) for x in df["vol"].tolist()]
     trade_dates = [str(x) for x in df["trade_date"].tolist()]
+    # 前5交易日日均量(手,不复权;v1.4 Phase B 盘中量能折算基准,与选股放量口径同源
+    # 即 compute_form 内部 vol_multiple 用的 vols[1:6] 窗口——排除今日,取紧邻前5日)。
+    _prev5 = vols[1:6]
+    prev5_avg_vol = round(sum(_prev5) / len(_prev5), 1) if _prev5 else 0.0
     # amount(千元,阶段3.1 VWAP 信号1);单票 daily 有 amount 列,缺列/缺值退化 0.0(vwap_ok False)。
     amounts = [float(x or 0.0) for x in df["amount"].tolist()] if "amount" in df.columns else None
 
@@ -97,6 +104,7 @@ def _fetch_form(
         "turnover": "—",  # 单票换手需 daily_basic;深判形态以 daily 为主,换手非关键
         "vwap_ok": form.vwap_ok,   # 收盘站 VWAP(信号1,喂 LLM 判量价形态)
         "_degraded": False,
+        "prev5_avg_vol": prev5_avg_vol,   # v1.4 Phase B:盘中量能折算基准(手)
     }
 
 
@@ -135,6 +143,8 @@ def analyze_stock(
     question: Optional[str] = None,
     history_digest: Optional[str] = None,
     now: Optional[date] = None,
+    intraday_quote: Optional[Quote] = None,
+    is_trading: bool = False,
     daily_fn: Optional[Callable] = None,
     moneyflow_fn: Optional[Callable] = None,
     sentiment_fn: Optional[Callable] = None,
@@ -149,6 +159,12 @@ def analyze_stock(
     **注入的是中性 digest,绝不是带情绪的 review_ref**(两路径分流)。
     全链路降级不崩:任一数据段失败 → 占位标注;DeepSeek 失败 → 降级占位卡。
     可注入 *_fn 免单测联网(adj_factor_fn 阶段2.5 新增,沿 daily_fn 模式)。
+
+    intraday_quote/is_trading(v1.4 Phase B):端点层判窗口 + 拉一拍完整 Quote 后传入,
+    本函数不自己拉盘中价(保持可注入/不联网)。仅 mode=='coach' 且 is_trading 且
+    intraday_quote 非 None 时,用 form['prev5_avg_vol'] + intraday_quote 组装盘中快照
+    存入 context['intraday'](prompt.py 据此渲染盘中块);candidate 模式一律不组装
+    (候选是次日进场判断,无盘中持仓语境)。
     """
     daily_fn = daily_fn or tc.ts_daily
     # 资金源 = 东财 moneyflow_dc(6000 积分,net_amount=超大单+大单主力净额)。与选股层
@@ -184,6 +200,15 @@ def analyze_stock(
         # 绝不放 review_ref(情绪串)——那只回客户端展示,不进 prompt。
         "history_digest": history_digest or "",
     }
+
+    # v1.4 Phase B:盘中上下文快照(仅 coach 模式 + 盘中 + 拿到 Quote 才组装,唯一路径——
+    # 与 form/fund 同处编排层组装,端点层不重复拉 daily/组装快照)。candidate 模式/窗口
+    # 外/quote=None 均不进 context,prompt.py 据 "intraday" 键是否存在决定要不要渲染盘中块。
+    if mode == "coach" and is_trading and intraday_quote is not None:
+        context["intraday"] = intraday.build_intraday_snapshot(
+            intraday_quote, form.get("prev5_avg_vol", 0.0),
+            now=datetime.now(), is_trading=True,
+        )
 
     try:
         analysis = deepseek_fn(context)
@@ -266,6 +291,8 @@ def chat_stock(
     trade_day: Optional[int] = None,
     history_digest: Optional[str] = None,
     now: Optional[date] = None,
+    intraday_quote: Optional[Quote] = None,
+    is_trading: bool = False,
     chat_fn: Optional[Callable] = None,
     daily_fn: Optional[Callable] = None,
     moneyflow_fn: Optional[Callable] = None,
@@ -281,6 +308,9 @@ def chat_stock(
     history_digest 为中性统计,**绝不含 review_ref**(守味隔离,调用方需自行丢弃 ref)。
     全链路降级不崩:任一数据段失败 → 占位标注;DeepSeek 失败 → degraded_chat。
     可注入 *_fn 免单测联网。
+
+    intraday_quote/is_trading(v1.4 Phase B,同 analyze_stock):仅 mode=='coach' 且
+    is_trading 且 intraday_quote 非 None 时组装盘中快照存入 context['intraday']。
     """
     daily_fn = daily_fn or tc.ts_daily
     moneyflow_fn = moneyflow_fn or tc.ts_moneyflow_dc
@@ -299,6 +329,13 @@ def chat_stock(
         # 中性历史纪律统计;绝不放 review_ref(情绪串)——那只回客户端展示,不进 prompt。
         "history_digest": history_digest or "",
     }
+
+    # v1.4 Phase B:同 analyze_stock,仅 coach + 盘中 + 有 Quote 才组装(candidate 不组装)。
+    if mode == "coach" and is_trading and intraday_quote is not None:
+        context["intraday"] = intraday.build_intraday_snapshot(
+            intraday_quote, facts["form"].get("prev5_avg_vol", 0.0),
+            now=now or datetime.now(), is_trading=True,
+        )
 
     try:
         result = chat_fn(messages, context)

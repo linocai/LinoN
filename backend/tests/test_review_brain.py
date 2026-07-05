@@ -182,7 +182,8 @@ def client(tmp_path, monkeypatch):
 
     cap = {}
 
-    def _fake_analyze(code, name, sector, mode, pnl_pct, trade_day, question, history_digest=None):
+    def _fake_analyze(code, name, sector, mode, pnl_pct, trade_day, question, history_digest=None,
+                      intraday_quote=None, is_trading=False):
         cap["history_digest"] = history_digest
         return {
             "analysis": {

@@ -310,10 +310,12 @@ def client(tmp_path, monkeypatch):
 
     cap = {}
 
-    def _fake_chat_fn(code, messages, *, mode, name, sector, pnl_pct, trade_day, history_digest):
+    def _fake_chat_fn(code, messages, *, mode, name, sector, pnl_pct, trade_day, history_digest,
+                      intraday_quote=None, is_trading=False):
         cap["last_call"] = dict(
             code=code, messages=messages, mode=mode, name=name, sector=sector,
             pnl_pct=pnl_pct, trade_day=trade_day, history_digest=history_digest,
+            intraday_quote=intraday_quote, is_trading=is_trading,
         )
         result = cap.get("_next_result") or {
             "reply": "默认回复", "verdict": "可进", "fund_asof": "2026-07-01", "degraded": False,

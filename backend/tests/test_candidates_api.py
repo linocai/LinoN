@@ -66,6 +66,8 @@ def client(tmp_path, monkeypatch):
         lambda basis: (_fake_rows(20), False, "ok", "2026-05-06"),
         raising=False,
     )
+    # v1.4 Phase C:prev5 均量是模块级跨测试共享缓存,每个测试隔离清空免跨测试污染。
+    app_mod._PREV5_CACHE.clear()
     with TestClient(app_mod.app) as c:
         yield c, app_mod
 
@@ -199,11 +201,13 @@ def _legal_analysis(verdict="可进"):
 def _inject_analyze(app_mod, monkeypatch, analysis=None, fund_asof="2026-05-06", capture=None):
     analysis = analysis or _legal_analysis()
 
-    def _fake(code, name, sector, mode, pnl_pct, trade_day, question, history_digest=None):
+    def _fake(code, name, sector, mode, pnl_pct, trade_day, question, history_digest=None,
+              intraday_quote=None, is_trading=False):
         if capture is not None:
             capture.update(dict(code=code, name=name, sector=sector, mode=mode,
                                 pnl_pct=pnl_pct, trade_day=trade_day, question=question,
-                                history_digest=history_digest))
+                                history_digest=history_digest,
+                                intraday_quote=intraday_quote, is_trading=is_trading))
         return {"analysis": analysis, "fund_asof": fund_asof}
 
     monkeypatch.setattr(app_mod, "_analyze_fn", _fake, raising=False)
@@ -385,6 +389,102 @@ def test_coach_advice_hold_when_watch(client, monkeypatch):
     assert b["advice"] == "拿"    # 观望 → 拿
 
 
+# —— v1.4 Phase B:coach 盘中上下文注入(端点层判窗口 + 拉一拍 Quote)————————————
+
+def _freeze_now(monkeypatch, app_mod, iso_dt: str) -> None:
+    """冻结 app_mod.datetime.now() 到指定时刻(控制 _is_intraday_window 判定)。
+
+    coach_position/chat 端点用 `datetime.now()`(app.py 顶层 import 的 `datetime`)判
+    is_trading;需 monkeypatch app_mod 模块内的 datetime 名字(而非标准库 datetime.date,
+    那是给 _current_trade_date/D 计数用的另一路径,见 _freeze_today)。
+    """
+    from datetime import datetime as _real_datetime
+
+    y, m, d, hh, mm = (int(x) for x in iso_dt.replace("-", " ").replace(":", " ").split())
+    frozen = _real_datetime(y, m, d, hh, mm)
+
+    class _FixedDatetime(_real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen
+
+    monkeypatch.setattr(app_mod, "datetime", _FixedDatetime)
+
+
+def test_coach_intraday_window_injects_full_quote(client, monkeypatch):
+    """盘中(交易日 10:30)→ 端点拉一拍完整 Quote,传给 _analyze_fn 的 intraday_quote/
+    is_trading;pnl_pct 复用同一 Quote 的 price(不重复拉,建议同 _resolve_prices 契约)。"""
+    c, app_mod = client
+    from app.data.realtime import Quote
+
+    cap = {}
+    _inject_analyze(app_mod, monkeypatch, analysis=_legal_analysis("观望"), capture=cap)
+    _freeze_today(monkeypatch, "2026-06-23")   # 周二,交易日
+    _freeze_now(app_mod=app_mod, monkeypatch=monkeypatch, iso_dt="2026-06-23 10:30")
+
+    fake_quote = Quote(
+        code="600000", name="x", price=103.0, pre_close=100.0, open=101.0,
+        high=104.0, low=100.5, limit_up=110.0, limit_down=90.0,
+        volume=5000.0, amount=103.0 * 5000.0 * 100.0,
+        ts="2026-06-23 10:30:00", source="sina",
+    )
+    monkeypatch.setattr(app_mod, "_quotes_fn", lambda codes: {"600000": fake_quote}, raising=False)
+
+    op = c.post("/api/v1/positions/open", json={
+        "code": "600000", "buy_price": 100.0, "qty": 100, "entry_reason": "x",
+    }, headers=AUTH)
+    pid = op.json()["position_id"]
+    r = c.post(f"/api/v1/positions/{pid}/coach", json={}, headers=AUTH)
+    assert r.status_code == 200
+    assert cap["is_trading"] is True
+    assert cap["intraday_quote"] is fake_quote
+    assert cap["pnl_pct"] == pytest.approx(3.0)   # (103-100)/100,复用同一 Quote
+
+
+def test_coach_non_trading_window_no_intraday_quote(client, monkeypatch):
+    """非交易时段(20:00)→ is_trading=False,intraday_quote=None,不拉盘中价。"""
+    c, app_mod = client
+    cap = {}
+    _inject_analyze(app_mod, monkeypatch, analysis=_legal_analysis("观望"), capture=cap)
+    _freeze_today(monkeypatch, "2026-06-23")
+    _freeze_now(app_mod=app_mod, monkeypatch=monkeypatch, iso_dt="2026-06-23 20:00")
+    # _quotes_fn 若被调用会抛异常,断言窗口外确实不拉价(is_trading=False 分支跳过)
+    def _boom(codes):
+        raise AssertionError("非交易时段不应拉盘中 Quote")
+    monkeypatch.setattr(app_mod, "_quotes_fn", _boom, raising=False)
+
+    op = c.post("/api/v1/positions/open", json={
+        "code": "600001", "buy_price": 50.0, "qty": 100, "entry_reason": "x",
+    }, headers=AUTH)
+    pid = op.json()["position_id"]
+    r = c.post(f"/api/v1/positions/{pid}/coach", json={}, headers=AUTH)
+    assert r.status_code == 200
+    assert cap["is_trading"] is False
+    assert cap["intraday_quote"] is None
+    assert cap["pnl_pct"] is None   # 窗口外走 _resolve_prices([code]),_quotes_fn 抛异常已被吞
+
+
+def test_coach_intraday_quote_missing_falls_back_to_resolve_prices(client, monkeypatch):
+    """盘中但该票拉价失败(_quotes_fn 返回不含该 code)→ intraday_quote=None,is_trading
+    仍 True,coach 照常出(退化为无盘中上下文,同 v1.3.x 现状)。"""
+    c, app_mod = client
+    cap = {}
+    _inject_analyze(app_mod, monkeypatch, analysis=_legal_analysis("观望"), capture=cap)
+    _freeze_today(monkeypatch, "2026-06-23")
+    _freeze_now(app_mod=app_mod, monkeypatch=monkeypatch, iso_dt="2026-06-23 10:30")
+    monkeypatch.setattr(app_mod, "_quotes_fn", lambda codes: {}, raising=False)
+
+    op = c.post("/api/v1/positions/open", json={
+        "code": "600002", "buy_price": 20.0, "qty": 100, "entry_reason": "x",
+    }, headers=AUTH)
+    pid = op.json()["position_id"]
+    r = c.post(f"/api/v1/positions/{pid}/coach", json={}, headers=AUTH)
+    assert r.status_code == 200
+    assert cap["is_trading"] is True
+    assert cap["intraday_quote"] is None
+    assert cap["pnl_pct"] is None
+
+
 # —— F4:GET /candidates/outcomes(只读统计,鉴权,本版本不接客户端)——————————
 
 def test_outcomes_requires_auth(client):
@@ -463,3 +563,211 @@ def test_outcomes_since_filters(client):
     b = r.json()
     assert b["sample_total"] == 1
     assert b["since"] == "2026-06-20"
+
+
+# —— v1.4 Phase C:GET /candidates/intraday(今日续强确认,读时叠加不落库)————————
+
+def _fake_quote_for(code: str, price: float = 45.6, pre_close: float = 44.0,
+                    open_: float = 44.5, volume: float = 8000.0) -> "object":
+    from app.data.realtime import Quote
+    return Quote(
+        code=code, name=f"票{code}", price=price, pre_close=pre_close, open=open_,
+        high=price + 1, low=pre_close - 1, limit_up=pre_close * 1.1, limit_down=pre_close * 0.9,
+        volume=volume, amount=price * volume * 100.0,   # 真实比例(致命#1 单位口径)
+        ts="2026-06-23 10:30:00", source="sina",
+    )
+
+
+def _freeze_now_intraday(monkeypatch, app_mod, iso_dt: str) -> None:
+    """同 _freeze_now,供 candidates_intraday 端点冻结 datetime.now()。"""
+    from datetime import datetime as _real_datetime
+
+    y, m, d, hh, mm = (int(x) for x in iso_dt.replace("-", " ").replace(":", " ").split())
+    frozen = _real_datetime(y, m, d, hh, mm)
+
+    class _FixedDatetime(_real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen
+
+    monkeypatch.setattr(app_mod, "datetime", _FixedDatetime)
+
+
+def _ok_prev5_daily(code, start, end):
+    """假 daily:近 10 行,vol 恒 1000(手)→ prev5_avg_vol=1000.0。"""
+    import pandas as pd
+    from app.data.tushare_client import TushareResult
+
+    rows = []
+    for i in range(10):
+        rows.append({"trade_date": f"202606{20 - i:02d}", "vol": 1000.0})
+    return TushareResult.success(pd.DataFrame(rows))
+
+
+def test_candidates_intraday_requires_auth(client):
+    c, _ = client
+    assert c.get("/api/v1/candidates/intraday").status_code == 401
+
+
+def test_candidates_intraday_no_candidates_degraded(client):
+    """无候选缓存 → degraded:true,items 空,isTrading=false。"""
+    c, _ = client
+    r = c.get("/api/v1/candidates/intraday", headers=AUTH)
+    assert r.status_code == 200
+    b = r.json()
+    assert b["ok"] is True and b["degraded"] is True
+    assert b["items"] == [] and b["isTrading"] is False
+
+
+def test_candidates_intraday_trading_window_injects_realtime_fields(client, monkeypatch):
+    """交易时段:批量注入假 quotes → items 带实时字段 + volNote,顶层 isTrading=true。"""
+    c, app_mod = client
+    c.post("/api/v1/candidates/refresh", headers=AUTH)   # 落 20 条候选(600001..600020)
+
+    quotes = {f"60000{i}": _fake_quote_for(f"60000{i}") for i in range(1, 10)}
+    monkeypatch.setattr(app_mod, "_quotes_fn", lambda codes: quotes, raising=False)
+    monkeypatch.setattr(app_mod, "_daily_fn", _ok_prev5_daily, raising=False)
+    _freeze_now_intraday(monkeypatch, app_mod, "2026-06-23 10:30")
+
+    r = c.get("/api/v1/candidates/intraday", headers=AUTH)
+    assert r.status_code == 200
+    b = r.json()
+    assert b["isTrading"] is True
+    assert b["tradeDate"] == "2026-05-06"
+    assert b["degraded"] is False
+    assert len(b["items"]) == 20
+    hit = next(i for i in b["items"] if i["code"] == "600001")
+    assert hit["price"] == 45.6
+    assert hit["chgPct"] is not None
+    assert hit["volNote"] == "ok"
+    assert hit["intradayVolRatio"] is not None
+    assert hit["isAboveVwap"] is not None
+
+
+def test_candidates_intraday_non_trading_window_all_null(client, monkeypatch):
+    """窗口外:isTrading=false,items 实时字段全 null,不拉价(_quotes_fn 不应被调用)。"""
+    c, app_mod = client
+    c.post("/api/v1/candidates/refresh", headers=AUTH)
+
+    def _boom(codes):
+        raise AssertionError("非交易时段不应拉盘中批量 Quote")
+
+    monkeypatch.setattr(app_mod, "_quotes_fn", _boom, raising=False)
+    _freeze_now_intraday(monkeypatch, app_mod, "2026-06-23 20:00")   # 20:00,窗口外
+
+    r = c.get("/api/v1/candidates/intraday", headers=AUTH)
+    assert r.status_code == 200
+    b = r.json()
+    assert b["isTrading"] is False
+    assert b["asof"] == ""
+    for item in b["items"]:
+        assert item["price"] is None
+        assert item["chgPct"] is None
+        assert item["openChgPct"] is None
+        assert item["isAboveVwap"] is None
+        assert item["intradayVolRatio"] is None
+        assert item["volNote"] == "non_trading"
+
+
+def test_candidates_intraday_single_code_price_fetch_missing(client, monkeypatch):
+    """单票拉价缺失(批量结果不含该 code)→ 该票 price=null volNote=no_base,其余票正常。"""
+    c, app_mod = client
+    c.post("/api/v1/candidates/refresh", headers=AUTH)
+
+    quotes = {f"60000{i}": _fake_quote_for(f"60000{i}") for i in range(2, 21)}  # 缺 600001
+    monkeypatch.setattr(app_mod, "_quotes_fn", lambda codes: quotes, raising=False)
+    monkeypatch.setattr(app_mod, "_daily_fn", _ok_prev5_daily, raising=False)
+    _freeze_now_intraday(monkeypatch, app_mod, "2026-06-23 10:30")
+
+    r = c.get("/api/v1/candidates/intraday", headers=AUTH)
+    b = r.json()
+    missing = next(i for i in b["items"] if i["code"] == "600001")
+    assert missing["price"] is None and missing["volNote"] == "no_base"
+    present = next(i for i in b["items"] if i["code"] == "600002")
+    assert present["price"] is not None
+
+
+def test_candidates_intraday_open_chg_pct_calculation(client, monkeypatch):
+    """openChgPct = (open - pre_close)/pre_close*100 计算正确。"""
+    c, app_mod = client
+    c.post("/api/v1/candidates/refresh", headers=AUTH)
+
+    quotes = {"600001": _fake_quote_for("600001", price=45.6, pre_close=40.0, open_=42.0)}
+    monkeypatch.setattr(app_mod, "_quotes_fn", lambda codes: quotes, raising=False)
+    monkeypatch.setattr(app_mod, "_daily_fn", _ok_prev5_daily, raising=False)
+    _freeze_now_intraday(monkeypatch, app_mod, "2026-06-23 10:30")
+
+    r = c.get("/api/v1/candidates/intraday", headers=AUTH)
+    hit = next(i for i in r.json()["items"] if i["code"] == "600001")
+    assert hit["openChgPct"] == pytest.approx(5.0)   # (42-40)/40*100
+
+
+def test_candidates_intraday_vwap_degrades_on_zero_volume(client, monkeypatch):
+    """volume<=0(停牌/无成交)→ isAboveVwap=null(VWAP 降级,不猜)。"""
+    c, app_mod = client
+    c.post("/api/v1/candidates/refresh", headers=AUTH)
+
+    quotes = {"600001": _fake_quote_for("600001", volume=0.0)}
+    monkeypatch.setattr(app_mod, "_quotes_fn", lambda codes: quotes, raising=False)
+    monkeypatch.setattr(app_mod, "_daily_fn", _ok_prev5_daily, raising=False)
+    _freeze_now_intraday(monkeypatch, app_mod, "2026-06-23 10:30")
+
+    r = c.get("/api/v1/candidates/intraday", headers=AUTH)
+    hit = next(i for i in r.json()["items"] if i["code"] == "600001")
+    assert hit["isAboveVwap"] is None
+
+
+def test_candidates_intraday_pre_close_zero_chg_pct_null(client, monkeypatch):
+    """pre_close<=0(除零守卫,建议#6)→ chgPct/openChgPct=null。"""
+    c, app_mod = client
+    c.post("/api/v1/candidates/refresh", headers=AUTH)
+
+    quotes = {"600001": _fake_quote_for("600001", pre_close=0.0)}
+    monkeypatch.setattr(app_mod, "_quotes_fn", lambda codes: quotes, raising=False)
+    monkeypatch.setattr(app_mod, "_daily_fn", _ok_prev5_daily, raising=False)
+    _freeze_now_intraday(monkeypatch, app_mod, "2026-06-23 10:30")
+
+    r = c.get("/api/v1/candidates/intraday", headers=AUTH)
+    hit = next(i for i in r.json()["items"] if i["code"] == "600001")
+    assert hit["chgPct"] is None and hit["openChgPct"] is None
+
+
+def test_candidates_intraday_asof_takes_first_non_empty_quote_ts(client, monkeypatch):
+    """asof 取 items 里第一个非空 quote.ts(建议#7),非当前系统时间。"""
+    c, app_mod = client
+    c.post("/api/v1/candidates/refresh", headers=AUTH)
+
+    quotes = {"600001": _fake_quote_for("600001")}
+    quotes["600001"].ts = "2026-06-23 10:31:07"
+    monkeypatch.setattr(app_mod, "_quotes_fn", lambda codes: quotes, raising=False)
+    monkeypatch.setattr(app_mod, "_daily_fn", _ok_prev5_daily, raising=False)
+    _freeze_now_intraday(monkeypatch, app_mod, "2026-06-23 10:35")   # 系统时间与 quote.ts 不同
+
+    r = c.get("/api/v1/candidates/intraday", headers=AUTH)
+    b = r.json()
+    assert b["asof"] == "2026-06-23 10:31:07"
+
+
+def test_candidates_intraday_prev5_cache_avoids_repeat_daily_pull(client, monkeypatch):
+    """prev5 按 (code, trade_date) 缓存:同日第二次调用不再调 _daily_fn(建议#5)。"""
+    c, app_mod = client
+    c.post("/api/v1/candidates/refresh", headers=AUTH)
+
+    quotes = {"600001": _fake_quote_for("600001")}
+    monkeypatch.setattr(app_mod, "_quotes_fn", lambda codes: quotes, raising=False)
+    _freeze_now_intraday(monkeypatch, app_mod, "2026-06-23 10:30")
+
+    calls = {"n": 0}
+
+    def _counting_daily(code, start, end):
+        calls["n"] += 1
+        return _ok_prev5_daily(code, start, end)
+
+    monkeypatch.setattr(app_mod, "_daily_fn", _counting_daily, raising=False)
+    # 缓存已在 client fixture 里清空,此处无需重复清。
+
+    c.get("/api/v1/candidates/intraday", headers=AUTH)
+    first_calls = calls["n"]
+    assert first_calls >= 1
+    c.get("/api/v1/candidates/intraday", headers=AUTH)
+    assert calls["n"] == first_calls   # 第二次未再调用(命中缓存)

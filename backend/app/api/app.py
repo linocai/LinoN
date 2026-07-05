@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -39,6 +40,7 @@ from app.calendar.trading_calendar import (
     is_trading_day,
 )
 from app.config import settings
+from app.data import intraday
 from app.db import store
 from app.monitor.escalation import EscalationManager
 from app.screen import rules
@@ -339,6 +341,118 @@ def list_candidates() -> CandidatesList:
     )
 
 
+# —— v1.4 Phase C:候选池「今日续强确认」(读时叠加,不落库)—————————————————————
+
+# prev5 均量按 (code, trade_date) 进程内缓存(仿 app.screen.fetch.load_industry_map
+# 模式)——prev5 是 EOD 派生、当日内不变,首次算完缓存,同日重复调用只剩批量拉价一拍。
+# 拉取失败不缓存(留下次重试),不跨进程持久。
+_PREV5_CACHE: dict = {}
+
+
+def _default_daily_fn(code: str, start: str, end: str):
+    from app.data import tushare_client as tc
+    return tc.ts_daily(code, start, end)
+
+
+# 可注入测试替身(避免单测联网),同 _quotes_fn/_pipeline_fn 模式。
+_daily_fn = _default_daily_fn
+
+
+def _prev5_avg_vol(code: str, trade_date: str) -> float:
+    """单票前5交易日日均量(手,不复权),按 (code, trade_date) 缓存。失败/无数据 → 0.0。"""
+    from datetime import date, timedelta
+
+    key = (code, trade_date)
+    if key in _PREV5_CACHE:
+        return _PREV5_CACHE[key]
+
+    today = date.today()
+    end = today.strftime("%Y%m%d")
+    start = (today - timedelta(days=20)).strftime("%Y%m%d")   # 近20自然日,余量取够5个交易日
+    try:
+        res = _daily_fn(code, start, end)
+    except Exception:
+        logger.warning("prev5 均量拉取异常(降级 no_base)", exc_info=True)
+        return 0.0
+    if not res.ok or res.data is None or len(res.data) == 0:
+        return 0.0
+    df = res.data.sort_values("trade_date", ascending=False).reset_index(drop=True)
+    vols = [float(x) for x in df["vol"].tolist()]
+    # 与 analyze._fetch_form 同口径:vols[0] 是今日/最新已收盘日,前5日窗口为 vols[1:6]。
+    # 若数据里最新一行恰是"今日"(EOD 尚未收当日行),仍按此窗口取紧邻前5日,近似合理。
+    window = vols[1:6] if len(vols) > 1 else vols[:5]
+    if not window:
+        return 0.0
+    avg = round(sum(window) / len(window), 1)
+    _PREV5_CACHE[key] = avg
+    return avg
+
+
+@app.get(f"{API_PREFIX}/candidates/intraday", dependencies=[Depends(require_token)])
+def candidates_intraday() -> dict:
+    """候选池「今日续强确认」(plan §4 Phase C)。读时叠加实时盘中字段,不落库。
+
+    交易时段:批量拉一拍实时 Quote(realtime.get_realtime_quotes)+ 逐票 prev5 均量
+    (进程内缓存)→ 逐票 build_intraday_snapshot 组装。窗口外:isTrading=false + 实时
+    字段全 null,EOD 候选照常存在(此端点只回读时叠加数据,不影响 GET /candidates)。
+    """
+    td = store.latest_candidate_date()
+    if td is None:
+        return {
+            "ok": True, "isTrading": False, "tradeDate": "", "asof": "",
+            "degraded": True, "items": [],
+        }
+
+    all_rows = store.list_candidates(td)[: rules.CANDIDATE_LIMIT]
+    if not all_rows:
+        return {
+            "ok": True, "isTrading": False, "tradeDate": td, "asof": "",
+            "degraded": True, "items": [],
+        }
+
+    is_trading = intraday._is_intraday_window(datetime.now())
+    codes = [r["code"] for r in all_rows]
+
+    quotes: dict = {}
+    if is_trading:
+        try:
+            quotes = _quotes_fn(codes)
+        except Exception:
+            logger.warning("候选盘中批量拉价失败(降级为空)", exc_info=True)
+            quotes = {}
+
+    items = []
+    asof = ""
+    for row in all_rows:
+        code = row["code"]
+        quote = quotes.get(code) if is_trading else None
+        prev5 = _prev5_avg_vol(code, td) if (is_trading and quote is not None) else 0.0
+        snap = intraday.build_intraday_snapshot(
+            quote, prev5, now=datetime.now(), is_trading=is_trading,
+        )
+        if not asof and snap.get("asof"):
+            asof = snap["asof"]
+        items.append({
+            "code": code,
+            "name": row.get("name", ""),
+            "price": snap["price"],
+            "chgPct": snap["chg_pct"],
+            "openChgPct": snap["open_chg_pct"],
+            "isAboveVwap": snap["is_above_vwap"],
+            "intradayVolRatio": snap["intraday_vol_ratio"],
+            "volNote": snap["vol_note"],
+        })
+
+    return {
+        "ok": True,
+        "isTrading": is_trading,
+        "tradeDate": td,
+        "asof": asof,
+        "degraded": False,
+        "items": items,
+    }
+
+
 # —— D2 强制重算候选(鉴权)——————————————————————————————————————————
 
 @app.post(f"{API_PREFIX}/candidates/refresh", dependencies=[Depends(require_token)])
@@ -506,6 +620,9 @@ def coach_position(position_id: int, body: CoachRequest) -> dict:
     最看重量能萎缩 + 主力资金还在不在(方法论在 system prompt)。返回
     {ok, advice:"拿"|"清", reason, analysis: DeepAnalysis, fund_asof}。
     上游失败 → 降级占位卡 + advice 由 verdict 派生(观望→拿),HTTP 仍 200。
+
+    v1.4 Phase B:盘中时单票拉一拍完整 Quote(供 pnl_pct + 盘中上下文注入两用,不重拉);
+    窗口外/拉价失败 → intraday_quote=None、is_trading=False,深判照常退化为纯 EOD。
     """
     from datetime import date
     from app.llm.analyze import coach_advice_from_analysis
@@ -518,10 +635,15 @@ def coach_position(position_id: int, body: CoachRequest) -> dict:
         )
 
     code = pos["code"]
-    # 当前盈亏%(按需拉一拍实时价;拉不到则 None,深判仍可做)
+    is_trading = intraday._is_intraday_window(datetime.now())
+    intraday_quote = _resolve_intraday_quote(code) if is_trading else None
+
+    # 当前盈亏%:盘中已拿到 Quote 则复用其 price(不重复拉);否则走原 _resolve_prices。
     pnl_pct = None
-    prices = _resolve_prices([code])
-    price = prices.get(code)
+    if intraday_quote is not None:
+        price = intraday_quote.price
+    else:
+        price = _resolve_prices([code]).get(code)
     if price and pos["buy_price"]:
         pnl_pct = round((price - pos["buy_price"]) / pos["buy_price"] * 100, 2)
     trade_day = count_holding_trade_days(pos["buy_date"], date.today())
@@ -533,7 +655,7 @@ def coach_position(position_id: int, body: CoachRequest) -> dict:
 
     result = _analyze_fn(
         code, pos.get("name", code), "", "coach", pnl_pct, trade_day, body.question,
-        history_digest,
+        history_digest, intraday_quote, is_trading,
     )
     analysis = result["analysis"]
     advice = coach_advice_from_analysis(analysis)
@@ -586,6 +708,8 @@ def chat(body: ChatRequest) -> dict:
     pnl_pct: Optional[float] = None
     trade_day: Optional[int] = None
     name, sector = "", ""
+    is_trading = False
+    intraday_quote = None
 
     if body.mode == "coach":
         if body.position_id is None:
@@ -601,8 +725,13 @@ def chat(body: ChatRequest) -> dict:
             )
         bare = pos["code"]   # 以持仓 code 为准,忽略 body.code(同现 /coach)
         name = pos.get("name", bare)
-        prices = _resolve_prices([bare])
-        price = prices.get(bare)
+        # v1.4 Phase B:盘中时单票拉一拍完整 Quote(供 pnl_pct + 盘中上下文注入两用)。
+        is_trading = intraday._is_intraday_window(datetime.now())
+        intraday_quote = _resolve_intraday_quote(bare) if is_trading else None
+        if intraday_quote is not None:
+            price = intraday_quote.price
+        else:
+            price = _resolve_prices([bare]).get(bare)
         if price and pos["buy_price"]:
             pnl_pct = round((price - pos["buy_price"]) / pos["buy_price"] * 100, 2)
         trade_day = count_holding_trade_days(pos["buy_date"], date.today())
@@ -618,6 +747,7 @@ def chat(body: ChatRequest) -> dict:
     result = _chat_fn(
         bare, messages_payload, mode=body.mode, name=name, sector=sector,
         pnl_pct=pnl_pct, trade_day=trade_day, history_digest=history_digest,
+        intraday_quote=intraday_quote, is_trading=is_trading,
     )
 
     if is_first and body.mode == "candidate" and not result["degraded"]:
@@ -634,11 +764,13 @@ def chat(body: ChatRequest) -> dict:
     }
 
 
-def _default_chat_fn(code, messages, *, mode, name, sector, pnl_pct, trade_day, history_digest):
+def _default_chat_fn(code, messages, *, mode, name, sector, pnl_pct, trade_day, history_digest,
+                     intraday_quote=None, is_trading=False):
     from app.llm.analyze import chat_stock
     return chat_stock(
         code, messages, mode=mode, name=name, sector=sector,
         pnl_pct=pnl_pct, trade_day=trade_day, history_digest=history_digest,
+        intraday_quote=intraday_quote, is_trading=is_trading,
     )
 
 
@@ -796,12 +928,13 @@ def _resolve_candidate_meta(code: str) -> tuple:
 
 
 def _default_analyze_fn(code, name, sector, mode, pnl_pct, trade_day, question,
-                        history_digest=None):
+                        history_digest=None, intraday_quote=None, is_trading=False):
     from app.llm.analyze import analyze_stock
     return analyze_stock(
         code, name, sector, mode=mode,
         pnl_pct=pnl_pct, trade_day=trade_day, question=question,
         history_digest=history_digest,
+        intraday_quote=intraday_quote, is_trading=is_trading,
     )
 
 
@@ -866,6 +999,18 @@ def _default_quotes_fn(codes: list) -> dict:
 
 # 可注入测试替身(避免单测联网)。
 _quotes_fn = _default_quotes_fn
+
+
+def _resolve_intraday_quote(code: str):
+    """v1.4 Phase B/C:单票拉一拍完整 Quote(供盘中上下文注入;非 _resolve_prices 的
+    float dict)。拉取失败/该票不在返回里 → None,深判/端点照常退化。同走 _quotes_fn
+    注入口,单测不联网。"""
+    try:
+        quotes = _quotes_fn([code])
+    except Exception:
+        logger.warning("拉盘中 Quote 失败(降级 None)", exc_info=True)
+        return None
+    return (quotes or {}).get(code)
 
 
 def _read_trade_flags(trade_id: int) -> dict:
