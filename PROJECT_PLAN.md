@@ -53,6 +53,7 @@
 - **v1.2.1(深析对话化 + 追问接 DeepSeek)已完工收口并上线**:三件事——① 候选行只有「深析」按钮进(双端);② 初始深析从结构化三轴卡改对话式自由文本;③ 追问框真接 DeepSeek 多轮问答。新增统一对话端点 `POST /chat`(不合并进 `/analyze`/`/coach`,二者保留供回测链路/教练红橙卡);对话 prose reply + 旁路抽 verdict 落库(仅首条候选对话且非降级才落);后端无状态、多轮上下文客户端全量回传;守味隔离沿阶段3(只注入 history_digest);对话专属超时 25s×2。reviewer 审查**零致命**,2 个重要问题(coach 区间措辞按 pnl 派生 / 事实缓存条件改 and)已修复。**两步全量部署已上线 ECS**(先收 store 拆包重构欠账、再上 v1.2.1 新增),端到端验通:`/chat` 生产返 181 字自由对话、fund_asof 07-02、东财资金流入正常。7 条 🔵 建议 + 1 条遗留入 §5 Backlog。全文 `archive/v1.2.1_plan.md` + `archive/REVIEW_REPORT_v1.2.1.md`。
 - **v1.3.0(实战反馈四件套)已完工收口**:四条用户实战反馈驱动的改动——② 三仓相关性护栏(行业 Tushare 口径·只提示不拦·只在买入路径)、④ 交易成本自动化+净额复盘(🔴高危·金额计算+第三次真 migration)、⑤ 候选放开固定 20(删满仓闭门)、⑥ 导出同花顺 TXT(纯前端)。⑦选股大改+③买入理由结构化推迟到 v1.3.1。走完整工作流:planner→plan-critic(零致命3重要8建议·修订)→builder-pro(Phase B高危)+主会话Opus复审→builder(后端A+C)→builder(前端C3+D+E)→reviewer(Fable·1 致命[URL `?` 编码坏致相关性护栏生产静默失效]→已修/2 重要/6 建议)→主会话审后修复。门禁:后端 pytest **337→378 全绿**(新增 41,Phase A 相关性 16 条 + Phase C 截断口径重写净增 3);客户端 XCTest **49→65 全绿**;双端 `BUILD SUCCEEDED`。新增端点 **1 个**:`GET /positions/correlation`。第三次真 migration:`positions.industry` + `trades.qty/fee/net_pnl_amount`(均 nullable 前向兼容)。全文 `archive/v1.3.0_plan.md` + `archive/REVIEW_REPORT_v1.3.0.md`。
 - **门禁数字**:**已发布 3 阶段**(阶段1+阶段2+v1.2.1,live `https://ln.linotsai.top`,阶段2 于 2026-06-28 上线、v1.2.1 于 2026-07-02 两步上线;阶段2.5/阶段3/阶段3.1 为纯后端/全栈小版本随部署链路一并上线;`app/db/store.py` 单文件在 ECS 已不存在,store 拆包首次真上生产;**v1.3.0 已部署上线(2026-07-04)**)。**阶段4(K线/舆情/双端真机 E2E)待规划**。后端 pytest **378 全绿**(阶段1 基线 105 + 阶段2 新增 88 → 193 + 阶段2.5 新增 34 → 227 + 阶段3 新增 49 → 276 + 阶段3.1 新增 33 → 309 + v1.2.1 新增 28 → 337 + v1.3.0 新增 41);客户端 XCTest **65 全绿**(17 + 阶段2 新增 15 → 32,阶段2.5 无前端改动,阶段3 新增 8 → 40,阶段3.1 新增 4 → 44,v1.2.1 新增 5 → 49,v1.3.0 新增 16);**双端 build iOS Simulator + macOS 各 `BUILD SUCCEEDED`**;真 key 活体冒烟过(Tushare 5490 行/茅台白酒归类符合假设;DeepSeek `json_object` 真输出夹紧成合法 DeepAnalysis;analyze/coach/chat 真 key curl 闭环;离屏快照逐屏目检候选行/满仓🔒/深析卡 fund_asof/教练红橙卡;阶段2.5 真 token 限频冒烟 65/65 天 adj_factor 全部成功,零限频失败,耗时 39s→45.5-45.7s)。阶段2 新增端点 **4 个**:`GET /candidates`、`POST /candidates/refresh`、`POST /candidates/{code}/analyze`、`POST /positions/{id}/coach`;阶段2.5 新增只读端点 **1 个**:`GET /candidates/outcomes`;阶段3 新增端点 **3 个**(`GET /review`、`POST /review/{week}/note`、`GET /memory`)+ `/coach` 新增可选字段 `review_ref`;阶段3.1 无新增端点,`GET /candidates` 候选 dict 新增可选展示字段 `score`(int,前向兼容);v1.2.1 新增端点 **1 个**:`POST /chat`;v1.3.0 新增端点 **1 个**:`GET /positions/correlation`。
+- **v1.3.1(盘后选股完善)已立项规划中**:三块——① 新选股逻辑(删高位硬排除改只标注红/琥珀分级、粗筛量比口径、排序 9 因子集含距60日高点/横盘突破、量比接 `daily_basic.volume_ratio`、warnLevel 经 candidates 缓存表往返=**第四次真 migration `warn_level` 列**)、② 选股配置可调化(档 B·App 内调参屏 + 新表 `screen_config` 存 JSON 增量 + `GET/PUT` 端点 + 显式穿参生效,rules 常量降级为默认值/fallback)、③ 候选刷新改纯手动(删 15:35 自动 tick + `last_candidate_date` 防重,回填改挂 EOD 块)。持仓教练深判重做 + 盘中选股独立板块已定移 **v1.4**,本版不碰。§4 有完整 Phase(已过 plan-critic 一轮:1 致命[缓存断层]+6 重要+6 建议全吸收)。
 - **上线即空仓**:无存量持仓迁移,无 legacy / 既往不咎机制,`positions` 从 0 行起。
 - **止损线机械派生**:`stop_line = buy_price × 0.95`,**纯派生、不落库**(-10% 极强趋势例外已砍,止损恒为 ×0.95;与持仓天数同样按读取时算,单一事实源),系统自动算,**拒绝用户手填**。
 - **ECS 现实**:`deploy@118.178.122.194:/opt/linon`,systemd **单 unit** `linon.service` **active**(端口 **8001**,监控作 app 内后台轮询、不另起进程),nginx `ln.linotsai.top` + certbot 证书;内存紧(1.6G+2G swap),已占端口 8000/8787/5432/80/443/8001;`.env`/`.p8` 均 600 `linon:linon`。
@@ -70,24 +71,158 @@
 | 4 收尾(**待规划**) | — | K 线/分时图、舆情展示、双端真机 E2E 打磨 |
 | V2(推后) | 历史行情重放 / 纪律陪练沙盒(陪练非裁判) | 临场纪律陪练 |
 
-## 4. 当前版本 Plan(v1.3.1 规划中 · 盘后选股完善)
+## 4. 当前版本 Plan(v1.3.1 · 盘后选股完善)
 
-> **方向锁定**:本版只完善**盘后选股**(选股质量 + 工作流 + 持仓分析);**盘中选股独立为下一个大版本**(App 内"盘后/盘中"两板块分离),本版不碰。v1.3.0 已收口归档 `archive/v1.3.0_plan.md` + `archive/REVIEW_REPORT_v1.3.0.md`。
+> **范围三块**:A 新选股逻辑(后端为主 + 前端展示微调)/ B 选股配置可调化(档 B·App 内调参,全栈)/ C 候选刷新改手动(后端 + 前端)。**明确移 v1.4,本版不碰**:② 持仓教练深判重做(层2 盘中资金失真问题)、③ 盘中选股独立板块(Level-2 资金缺口)。v1.3.0 已收口归档 `archive/v1.3.0_plan.md`。
+> **红线**:离场铁律常量(`-5.0/+15/D4/count==4/±1%容差带`)本版**四层都不碰**;选股规则单一源仍在 `rules.py`,配置化后**配置是运行时源、rules 常量作默认/fallback**;费用常量(v1.3.0)/离场常量各自单一源不动。铁律"技术面交 LLM 判":新因子/新阈值同样标"经验默认·可迭代·不卡生死"。
 
-### 已定稿(钉死)
+### 已定稿背景(SOP·不落 Phase)
 
-**盘后操作周期 SOP**(T-1 盘后驱动 → T 日操作,循环):
-- **T-1 收盘后 ~16:00(手动触发)**:点刷新 → 拉全市场 EOD → **20 候选** → 导出同花顺(作明日观察池)→ 快速过一遍今日信息 → 可选深析、和 DeepSeek 讨论单只。
-- **T 日 开盘前~盘中**:视线 = **3 持仓 + 20 候选**,**优先看持仓**;持仓稳/走强 → 再看候选有无入场机会;(未来)可切盘中板块;执行 **卖持仓 / 买候选**。
-- **T 日 收盘** → 一个周期完成 → 回到 T 日 16:00 盘后刷新。
+**盘后操作周期 SOP**(T-1 盘后驱动 → T 日操作,循环):T-1 收盘后 ~16:00 手动点刷新 → 拉全市场 EOD → 20 候选 → 导出同花顺(明日观察池)→ 可选深析。T 日盘前~盘中视线 = 3 持仓 + 20 候选,优先看持仓 → 执行卖持仓/买候选。候选**固定 20 只**(沿用 v1.3.0,不闭门)。
 
-**刷新改手动(已拍板)**:删现有 15:35 自动 tick + 防重逻辑(连带清历史 backlog 的重启漏重推问题);候选只在用户手动点刷新时重算。理由:A 股新增盘后交易(到 15:30)致当日 EOD 数据发布更晚,固定时刻自动会抢在数据齐前跑出空列表;手动 = 用户确认数据出来再点,且匹配"傍晚坐下点刷新"的实际行为。界面显 trade_date 标候选新旧。候选仍**固定 20 只**(沿用 v1.3.0,不再闭门)。
+### 施工顺序与依赖
 
-### 待逐项讨论(未定,逐个敲定后再落 Phase)
+`Phase A1(rules/form 新因子·纯函数)` → `A2(fetch/pipeline 接线)` → `A3(前端 warn 分级展示)`;`Phase B1(新表+存取)` → `B2(GET/PUT 端点 + rules 读配置)` → `B3(客户端调参屏)`;`Phase C1(删自动 tick)` → `C2(前端刷新提示微调,可选)`。**A 与 C 独立可并行**;**B2 依赖 A2**(配置字段必须覆盖 A 新引入的全部权重/阈值,否则漏项)——故 **B 整体在 A 之后施工**。**B1 建表 + B2 配置校验/降级是 plan-critic 重点审面**(配置成为新单一源,校验/优先级/非法降级必须无懈可击)。
 
-- **①【未定】选股算法怎么改**:真痛点 = 20 候选对不上用户眼光(实测仅约 1/N 买的来自候选)。待用户讲清"自己重看时按什么挑",对比现行 8 因子(放量0.28/资金0.20/换手0.14/低位0.10/VWAP0.10/市值0.10/活跃0.08/单日软闸-0.06 + 黑名单/高位线/粗筛四条)找缺口。选股层现状全文见 `app/screen/{rules,pipeline,form}.py`。
-- **②【未定】持仓教练深判推倒重来**:持仓分析现状 = **层1 机械纪律**(监控实时价盯 3 硬线 -5%/+15%/D4 + T+1/一字跌停感知 + 未 ack 升级重推 + EOD 摘要,**保留不动**)+ **层2 教练深判**(on-demand `POST /positions/{id}/coach` → DeepSeek 拿/清二元 + 技术面/资金面 + 复盘历史引用/破纪律检测)。**层2 整个重做**——因其资金面盘中是 T-1 假数据、对盘中"拿/清"决策失真。**实时化边界(关键)**:价/pnl/放量/涨幅/VWAP 可实时(新浪/腾讯已有),但**主力资金盘中仍缺**(与③同一 Level-2 缺口);新分析模式 + 资金缺口如何处理待定。
-- **③【未定】盘中选股(下一个大版本)**:App 独立板块,盘后/盘中分离。数据实测(6000 积分 token):`realtime_quote`/`rt_min` 可用(实时价/量/分钟线),但 `rt_k` 无权限、**Tushare 资金接口全 EOD、无盘中主力资金**(盘中资金需 Level-2 付费源)。核心决策 = 盘中"主力资金"信号 砍掉 / 降级用 T-1 / 上 Level-2,待定。**②③共享"实时价可得、实时资金不可得"同一数据现实,可能共用一个实时数据层**。
+---
+
+### Phase A —— 新选股逻辑(后端为主 · A1/A2/A2.5 后端,A3 前端)
+
+选股四层重构。**离场四层不碰**;选股常量单一源仍 `rules.py`(B 之后由配置覆盖,本 Phase 先改 rules 默认值)。子 Phase:A1 rules/form 纯函数 → A2 fetch/pipeline 接线 → **A2.5 warnLevel 缓存链路(第四次真 migration,致命#1)** → A3 前端展示。
+
+**第1层 硬排除(改:删高位硬排除)**:
+- 删除高位线 ≥100% 排除 —— `high_position_verdict` **不再产 `'exclude'`**,只保留 `'warn'`/`'ok'` 两态(≥100% 与 [50,100%) 都归 warn,分级见 A3)。`pipeline.build_candidates` 里 `if verdict == "exclude": continue` **整段删除**。
+- 其余硬排除**不变**:黑名单代码段(`^(30|688|689|8|4|920)` 板块整段正则,只做主板 60*/00*)、ST、白酒行业(`stock_basic.industry` 精确归类)。
+
+**第2层 粗筛(改:①放量倍数→官方量比)**:保留四条,任一不过淘汰:
+1. **量比 ≥ `VOL_RATIO_MIN`(默认 1.5)** —— 口径从"自算放量倍数(当日量/5日均量)"换成 **Tushare `daily_basic.volume_ratio`**(现成字段,`ts_daily_basic_all` 已返回,当前未用)。`passes_coarse` 的 `sr.vol_multiple < VOL_MULTIPLE_MIN` 改为 `sr.volume_ratio < VOL_RATIO_MIN`。
+2. 近 3 日主力净流入 > 0(东财 `moneyflow_dc.net_amount` 合计,不变)。
+3. 当日主力非大幅出货 ≥ `DAY_OUTFLOW_FLOOR`(默认 -5000 万,不变)。
+4. 创 20 日新高 或 站 20 日均线(任一,不变)。
+
+**第3层 机械排序(新因子集,首版权重,全部进配置可调)**:`WEIGHTS` 换为下表(正权之和 = 1.00,单日软闸为负权罚项):
+
+| 键 | 因子 | 首版默认权重 | 口径 |
+|---|---|---|---|
+| `vol_ratio` | 量比 | **0.30** | `daily_basic.volume_ratio`(归一后进分) |
+| `pos_health` | 位置健康(距高点) | **0.16** | `今日收盘 / 近60日最高收盘`,越近高点分越高 |
+| `turnover` | 换手健康 | **0.14** | 满分带 **[7,15]%**(旧 [5,10]) |
+| `vwap` | VWAP 站均价 | **0.10** | 收盘 ≥ 当日 VWAP,布尔 0/1(不变) |
+| `breakout` | 横盘突破(新增) | **0.10** | 近25日振幅收窄 + 今日放量突破区间上沿,布尔 0/1 |
+| `mv_elastic` | 市值弹性 | **0.08** | 满分带 **[50,500]亿**、微盘 floor **30亿**(旧 [20,200]/floor 15) |
+| `active` | 近期活跃 | **0.06** | 近10日有涨停,布尔 0/1(不变) |
+| `fund` | 资金面 | **0.06** | `net_mf_rate_3d` 相对口径 min-max(veto 主要在粗筛,正权拉低) |
+| `day_surge` | 单日软闸 | **-0.06** | 今日 ≥9% 罚(penalty,不变) |
+
+- **关键替换 `low_position` → `pos_health`**:旧 `low_position = 1 - normalize(pct_60d)` 偏好"涨幅越低"→ 系统性给左侧下跌票高分(方向反了)。新 `pos_health` = `today_close / max(近60日收盘)`(∈(0,1],越接近 1 = 越贴近高点越强),直接进分**不再 min-max**(已是 [0,1] 绝对刻度);左侧持续下跌票距高点远 → 自然低分被压(**不排除**,只压分)。
+- 量比因子 `vol_ratio` 走 min-max 相对归一(同 `fund`);`turnover`/`mv_elastic`/`day_surge` 走各自评分函数(现有);`vwap`/`breakout`/`active` 布尔转 0/1。
+- 展示分 `score`([10,100] 池内 min-max 归一,不跨天可比)口径不变。
+- **展示口径解耦(建议#10)**:候选卡 `volMultiple`/`volPct` 展示**仍为自算放量倍数(当日量/5日均量)不变**——排序换官方量比、展示保留放量倍数,两者解耦。builder 勿顺手把展示串也换成量比。`sr.vol_multiple`(自算,form 仍产)供展示;`sr.volume_ratio`(官方)供粗筛/排序。
+
+**第4层 标注分级(改:高位分级 + 叠加)**:
+- 固定 Top 20(`CANDIDATE_LIMIT=20`,不变)。
+- warn 分级(前端 A3 用):高位 ≥100% → **红标**(新增 `high` 级)/ [50,100%) → **琥珀标**;单日强弩之末(≥9%)→ 琥珀标;**可叠加**(既高位又暴涨则两条都显)。级别取最高(有 high 则 warnLevel=high,否则有 amber 则 amber,否则 nil)。
+- 后端产 warn 需带级别信息(见 A3 契约:`warn` 串 + 新增 `warnLevel` 可选字段)。**`warnLevel` 必须穿过 `candidates` 缓存表往返**(A2.5 加列,否则生产静默失效——致命#1)。
+- **≥100% 票 warn 文案必须有人产(重要#6)**:旧 `high_warn_text` 只对 [50,100) 返文案、≥100% 返 None(旧逻辑 ≥100% 已 exclude 轮不到);A1 补 `high_warn_text` 对 ≥100% 返红级文案(如"60日累涨 X%,极高位,追高高危"),使 ≥100% 票 warnLevel=high 与 warn 文案配套一致。
+- **组合效应(预期行为,非回归·建议#12)**:删 ≥100% 硬排除 + `pos_health` 奖励贴高点 两刀同向,Top20 可能被高位强势票批量占据(红标兜底提示)——这是动量逻辑的**刻意选择**,reviewer 勿当回归追。
+
+**新形态计算(`form.py`,纯函数可单测,数据不足降级)**——从已有近60日复权 `closes`(新→旧)派生,新增两个 `FormResult` 字段:
+- `pos_health: float`(距60日高点)= `closes[0] / max(closes[:min(60,len)])`,分母 ≤0 → `0.0`;**数据不足 `len<20` → `0.0`(建议#9)**——次新股只几天数据会贴短命高点白拿满权,压掉;保守压分不误抬。范围 (0,1]。
+- `breakout_ok: bool`(横盘突破)= 满足全部三条才 True,否则 False:① 近24日(**排除今日**)振幅收窄:`(max(closes[1:25]) - min(closes[1:25])) / min(closes[1:25]) < BREAKOUT_RANGE_MAX`(默认 0.15);② 今日突破区间上沿:`closes[0] > max(closes[1:25])`(今日收盘高于过去24日最高);③ 量比配合:`volume_ratio >= BREAKOUT_VOL_RATIO_MIN`(默认 1.5)。**振幅窗口必须排除今日(重要#5)**:若把今日纳入振幅窗口,而突破条又令今日=最高,则振幅退化为 `(今日−最低)/最低`、越有力突破越判 False(把窄横盘+大阳线突破自己掐灭);故振幅与突破都在 `closes[1:25]`(过去24日,不含今日)上算。量比不在 `closes` 序列里 → `compute_form` 新增可选入参 `volume_ratio: Optional[float]=None`,缺失(None)→ 条③视为不满足 → `breakout_ok=False`(向后兼容旧调用)。数据不足 25 日 → False。
+
+**A1 验收(后端·纯函数)**:
+- `rules.py`:`WEIGHTS` 为上表 9 键、正权和 == 1.00(加断言测试);新增 `VOL_RATIO_MIN=1.5`、换手带 `[7,15]`、市值带 `[50,500]`/floor `30`、`BREAKOUT_RANGE_MAX=0.15`/`BREAKOUT_VOL_RATIO_MIN=1.5`;`high_position_verdict` 不再返 `'exclude'`(单测断言 pct_60d=200 → `'warn'` 非 `'exclude'`)。`pos_health` 因子进分不走 min-max(单测:两票 pos_health 0.99 vs 0.30 → 0.99 得高分)。所有新常量标注"经验默认·可迭代·不卡生死"。
+- `high_warn_text` 对 ≥100% 返红级文案(重要#6):单测 `high_warn_text(200)` 非空 + 该票 warnLevel 派生为 `"high"`(文案与级别配套断言)。
+- `form.py`:`compute_form` 新增 `pos_health`/`breakout_ok` 字段 + 可选 `volume_ratio` 入参;单测覆盖:pos_health 贴高点(≈1)/远离(小)、**数据不足 `len<20` → pos_health=0.0**(建议#9);breakout 三条件——**"窄横盘 + 大阳线突破今日=最高" → True**(重要#5 门禁用例:按"振幅含今日"的错误公式这条会 False,正好当回归护栏)、任一条不满足 → False、缺 volume_ratio → False、数据不足 25 日 → False。**复权序列方向契约不碰**(沿用 `qfq_closes` 新→旧、基准 `[0]`)。
+- 后端 pytest 全绿、无回归(旧 `low_position`/`vol_multiple` 相关测试相应改写,不 skip/deselect)。
+
+**A2 验收(后端·接线)**:
+- `fetch.StockRow` 新增 `volume_ratio: float=0.0`(从 `daily_basic.volume_ratio` 读);`_enrich_form` 把 `volume_ratio` 传入 `compute_form`,写回 `sr.pos_health`/`sr.breakout_ok`。
+- **NaN 守卫(重要#4)**:Tushare DataFrame 缺值是 **NaN 非 None**,`float(x or 0)` 拦不住(nan 是 truthy,`nan<1.5==False` → 该票会**放行**进池,再毒化 `rank_score` 的 min-max、整池分数 NaN 乱序)。`volume_ratio`(及本 Phase 新读的所有数值列)读入必须用 `pd.isna(x)` 守卫 → `0.0`;**A2 加 NaN 单测**:`volume_ratio=NaN` 的票粗筛被淘汰、不进 rank_score、不产 NaN 分数。
+- `pipeline`:`passes_coarse` 用量比;`build_candidates` 删高位 exclude 分支;`rank_score` 入参换新因子集(传 `volume_ratios`/`pos_healths`/`breakout_oks`,去掉旧 `pct_60ds`+`low_position` 用法,`pct_60d` 仅留给 warn 分级判定)。
+- 降级守恒不破:量比字段缺失/NaN → 该票量比=0(粗筛淘汰,不崩);pos_health/breakout 数据不足 → 保守压分/False。
+- 端到端本地冒烟:种样例或真 token 拉一次,`GET /candidates` 返 20 只、`degraded=false`、排序合理(距高点近的强票靠前、下跌左侧票被压)。
+
+**A2.5 验收(后端 · warnLevel 缓存链路 + 第四次真 migration · 致命#1)**:
+> `GET /candidates` 读的是 `candidates` **缓存表**(非 pipeline 直出),表不存 `pct_60d`、读取时派生不出级别;`upsert_candidates` 逐列白名单 INSERT 会**静默丢弃** `warnLevel`。不做本子 Phase = 红标功能生产静默失效(与 v1.3.0 URL bug 同源盲区:单测走内存、真链路走缓存表)。
+- **`candidates` 表加 `warn_level TEXT` 列**——**项目第四次真 migration**:扩 `schema._ensure_candidates_columns`(沿 PRAGMA `table_info` 探测 + `ALTER ADD COLUMN` + try/except 只 `log.error` 不 re-raise 姿势,同 score);`_SCHEMA` 的 candidates DDL 补一行注释指明 `warn_level` 由迁移补充(同 score 惯例)。为何 ALTER 不 DROP:候选历史行供回测回填扫描,不可丢(同 score 理由)。
+- **三处同步**:`candidates._CANDIDATE_KEYS`(列名映射)+ `upsert_candidates` INSERT 列 + `list_candidates` 输出,三处同增 `warn_level`;NULL 省键(同 `warn`/`score` 惯例,旧行 warn_level=NULL → 输出省略 → 客户端 nil,前向兼容)。
+- **穿透缓存回环测试(封死断层盲区)**:A2.5 验收必含一条端到端测试——pipeline 产 `warnLevel="high"` 的候选 → `upsert_candidates` 落库 → `list_candidates`/`GET /candidates` 读回**仍带 `warnLevel="high"`**(不是内存直测,必须过缓存表往返)。amber、nil 各一条。
+- 后端 pytest 全绿;新表列迁移连跑幂等无异常。**部署前置见 §5**(第四次 ALTER,先 `cp` 备份)。
+
+**A3 验收(前端·展示微调)**:
+- `Candidate` 新增可选 `warnLevel: String?`(`"high"`/`"amber"`/nil,前向兼容);`CandidatesListResponse` DTO 解码。后端 `pipeline` 产候选时按级别填(≥100% high、其余 warn 场景 amber)。
+- `CandidateRow.warnOrSector`:`warnLevel=="high"` → **红色**警告 pill(`LN.down`/红系)、`"amber"` → 琥珀 pill(现状)、nil → 板块标签。卡片背景 high 用红系极浅、amber 用琥珀极浅(现状 `LN.amber.opacity(0.04)`)。
+- 绿涨红跌不变;派生 bool 不字符串判负(warn 级别走后端 `warnLevel` 字段,不靠客户端解析 warn 文案)。
+- 双端 `xcodegen generate` + iOS Simulator + macOS `BUILD SUCCEEDED`;XCTest 全绿(新增 warnLevel 解码 + 红/琥珀分级测试)。
+
+---
+
+### Phase B —— 选股配置可调化(档 B · 全栈 · plan-critic 重点审)
+
+用户在 App 里调参 → PUT 存后端 → 下次手动刷新生效。**配置化后配置成为新单一事实源,`rules.py` 常量降级为默认值/fallback**。
+
+**config 形状(钉死 · 重要#2)——扁平单层键注册表**:config 是**扁平单层 dict**(9 权重键 + 各阈值键平铺,不嵌套——浅合并语义才成立)。定义一份「键注册表」`SCREEN_CONFIG_SPEC`(在 `rules.py`,每键含:类型 / 范围 / 类别(`weight` vs `threshold`)/ 默认值),校验/归一/UI 都以它为准。键集(值 == 各 rules 常量,建议#8 用**引用构造**):
+
+```
+权重(类别 weight,∈[0,1];day_surge ∈[-1,0]):
+  vol_ratio=0.30  pos_health=0.16  turnover=0.14  vwap=0.10
+  breakout=0.10   mv_elastic=0.08  active=0.06    fund=0.06   day_surge=-0.06
+阈值(类别 threshold):
+  vol_ratio_min=1.5   turnover_lo=7    turnover_hi=15   mv_lo=50   mv_hi=500   mv_floor=30
+  breakout_range_max=0.15   breakout_vol_ratio_min=1.5
+  day_outflow_floor=-5000   day_surge_warn_pct=9   active_lookback_days=10   limit_up_pct=9.8
+```
+
+**B1 —— 配置存储(后端 · 新表)验收**:
+- **存储选型(钉死)**:SQLite **新表 `screen_config`**,存**单行 JSON**(字段随迭代增删,JSON 单行避免频繁 migration)。表结构:`CREATE TABLE IF NOT EXISTS screen_config (id INTEGER PRIMARY KEY CHECK(id=1), config_json TEXT NOT NULL, updated_at TEXT NOT NULL)`。**`CREATE TABLE IF NOT EXISTS` 非 ALTER**(建表不是列迁移,风险低于 v1.3.0 真 migration;仍幂等,进 `init_db` 的 `_SCHEMA` executescript)。
+- 存取放 `app/db/store/` 新子模块 `screen_config.py`(re-export 进 `__init__`,沿拆包纪律):`get_screen_config() -> dict`(读单行 JSON,**无行/JSON 损坏 → 返回 `{}` 空 dict**,由上层合默认)、`put_screen_config(cfg: dict) -> None`(upsert id=1,写 `updated_at`)。**PUT 存增量(重要#2)**:只存用户显式提交的键(部分覆盖),不存全量——`get` 拿回的就是用户改过的那几个键,其余靠 resolve 合默认。
+- **默认值单一源仍在 `rules.py`**:`DEFAULT_SCREEN_CONFIG` = **由常量/`WEIGHTS` 引用构造**(`{"vol_ratio_min": VOL_RATIO_MIN, "turnover_lo": TURNOVER_HEALTHY_LO, ...}`、权重段引用 `WEIGHTS`),不手写第二份数字(建议#8 防双写漂移)+ **等值断言测试**(`DEFAULT_SCREEN_CONFIG` 各键 == 对应常量)。
+- B1 验收:新表建立幂等(连跑 `init_db` 无异常);`get/put` 往返一致;空表/坏 JSON `get` 返 `{}`;PUT 存的是增量(只含提交键);pytest 覆盖建表+存取+坏 JSON 降级。
+
+**B2 —— 配置合并/校验 + 生效机制 + 端点(后端 · plan-critic 重点)验收**:
+- **合并优先级(钉死)**:`resolve_screen_config() -> dict` = `DEFAULT_SCREEN_CONFIG`(基底)**浅合并**用户增量 `get_screen_config()`(只覆盖用户显式给的键,缺键用默认;未知键忽略)→ 得全量 → **再跑校验+权重归一**(见下)。返回全量已夹紧配置。
+- **生效机制(钉死 · 重要#3)——显式穿参,不 monkeypatch 常量**:常量消费点散在多个纯函数(`passes_coarse`/`rank_score`/`turnover_health_score`/`mv_elastic_score`/`day_surge_*`/`high_warn_text`/`compute_form`)。生效方式 = **`resolve_screen_config()` 出 cfg dict,由刷新链路显式穿参**:`_recompute_candidates → run_pipeline(cfg) → build_candidates(cfg)/passes_coarse(sr,cfg)/rank_score(...,cfg)` + `fetch 层 compute_form(...,cfg 相关阈值)`。**禁止 monkeypatch 模块级常量**(与 `/analyze` 并发时不安全 + 破单一源)——纯函数改为收 cfg 参数(缺省 = None 时回落 `DEFAULT_SCREEN_CONFIG`,保测试/旧调用可用)。
+- **深判层边界(钉死 · 重要#3)**:**`analyze.py`(深判)明确不吃用户配置,继续用 rules 默认常量**——深判里的 `LIMIT_UP_PCT` 等只作喂 DeepSeek 的 prompt 素材、不进选股打分,不引入并发配置态。此边界写进 B2 验收(断言深判路径不读 `screen_config`)。
+- **校验/夹紧(钉死)**:`validate_screen_config(cfg) -> dict` 按 `SCREEN_CONFIG_SPEC` 逐字段:① 类型不符/缺失/**非有限值(非 `math.isfinite`,重要#4)** → 用默认值;② 阈值越界夹到范围(`vol_ratio_min∈[1.0,5.0]`、换手带 lo<hi 且 ∈[0,50]、市值带 lo<hi 且 floor<lo、`day_surge`∈[-1,0]、`active_lookback_days∈[1,60]` 取整、权重每项 ∈[0,1] 等);③ **权重归一只在 resolve 合并出全量后做(重要#2)**:8 项正权之和 ≠1.0 → 按比例归一到和=1.0(`day_surge` 负权夹 [-1,0] 不参与归一);全 0 → 退回默认权重。**PUT 时逐键按范围夹紧但不归一**(部分提交无法归一,归一只对全量);归一发生在 `resolve`。**非法/异常配置 → 逐字段回退默认,绝不崩、绝不产空候选**(配置非法必须仍能出候选,与"无 token→degraded 空列表"两回事)。
+- **端点**(鉴权 `require_token`,`makeURL` 无 query):
+  - `GET /api/v1/screen/config` → `200 {config: {全量 resolve 后活配置}, defaults: {DEFAULT_SCREEN_CONFIG}, updated_at: str|null}`(config 供 UI 显示生效值,defaults 供"恢复默认")。
+  - `PUT /api/v1/screen/config` body `{config: {部分或全部键}}` → 逐键夹紧(不归一)→ `put_screen_config` 存**增量** → 返 `200 {ok:true, config: {resolve 后全量活配置}}`。**幂等**;越界键夹紧不 422(**能夹的夹、未知键忽略,一律 200 返夹紧结果**)。
+  - **恢复默认 = PUT 空 config `{}`(重要#2)** → 清空用户行(`put_screen_config({})` 或删行),resolve 全回默认。**不是** PUT 全量默认值(那会把当前 DEFAULT 冻结进库、挡未来默认演进)。
+- B2 验收:`resolve` 合并优先级(默认+增量覆盖)+ 全量后归一;校验各分支(类型错/NaN/越界/权重不归一/全0/未知键)都产合法配置;端点 GET/PUT 往返 + 夹紧 + 恢复默认(PUT `{}` 清行)真实 HTTP 验证;**`pipeline` 真读活配置**(改 `vol_ratio_min` 后 refresh,粗筛行为随之变——证穿参生效非 monkeypatch);深判路径不读配置;pytest 全绿。
+
+**B3 —— 客户端调参屏(前端)验收**:
+- 新增 `Views/ScreenConfigView.swift`(双端共享内容,布局分叉同其他屏):权重区(9 个滑块/步进,实时显示各权重 + 正权和,和≠1 时提示"保存时后端自动归一"——**客户端不自算归一**,归一在后端 resolve)+ 阈值区(量比min/换手带 lo·hi/市值带 lo·hi·floor/横盘突破振幅·量比/单日软闸阈/活跃回看天数,数字输入或步进)。底部「保存」→ `PUT {config: 用户改过的全部当前值}` → 用响应回填(展示归一/夹紧后的生效值)+ 提示"下次刷新生效";「恢复默认」→ **`PUT {config: {}}`**(空 → 后端清用户行)→ 用响应(全默认)回填。
+- 入口:挂在 `SettingsView`(现有设置屏)加一段/一个 `NavigationLink`(iOS)/区块(macOS)"选股参数",进 `ScreenConfigView`。**沿 SettingsView 跨端复用姿势**。
+- `APIClient` 新增 `fetchScreenConfig()`(GET)+ `putScreenConfig(_:)`(PUT,走 `makeURL` 无 query)。**PUT 方法**:现有 `APIClient` 只有 `get`/`post`,新增私有 `put(_:body:)`(同 post,`httpMethod="PUT"`)。
+- 客户端**只调参不重算**:保存后仅提示"下次手动刷新生效"(不自动触发 refresh);用户回候选页手动点刷新才生效——契约与"配置下次刷新读"一致。
+- 双端 `xcodegen generate` + iOS Simulator + macOS `BUILD SUCCEEDED`;XCTest 全绿(config DTO 编解码 + 归一提示逻辑测试)。
+
+---
+
+### Phase C —— 候选刷新改纯手动(C1 后端,C2 前端可选)
+
+**C1 验收(后端·删自动 tick)**:
+- 删 `monitor/loop.py` 的 **15:35 自动 candidate refresh tick**:`monitor_loop` 里 `if _is_after_candidate_window(now) and last_candidate_date != now.date(): run_candidate_refresh(...)` **整段删除** + `last_candidate_date` 变量删除 + `_is_after_candidate_window`/`_CANDIDATE_AFTER` 删除。
+- **`run_candidate_refresh` 编排函数是死码,直接删(订正·建议#11)**:`POST /candidates/refresh` 端点走 `app.py._recompute_candidates`、**从不经** `loop.run_candidate_refresh`;删自动 tick 后该函数无任何调用点 → **直接删除**(连同其单测改写/删除),不写"可保留复用"。
+- **⚠ 保留不动**:① EOD 摘要 tick(`run_eod_tick` + `last_eod_date`,那是**持仓推送**,不是候选,grep 确认别误删);② **候选回测回填 `run_candidate_backfill`**(阶段2.5 F3,现与 refresh 绑在同一 if 块内)——把它**移出**该 if 块,**挂进现有 `elif _is_after_close(now) and last_eod_date != now.date():` 块内**(EOD 推送后顺跑,借 `last_eod_date` 天然每交易日一次)。
+- **回填触发防重(钉死 · 重要#7)**:回填的"自扫描幂等"(`UNIQUE(entry_date,code)`)只防重复**落库**、防不了重复**打 Tushare**。若按字面 `if _is_after_close: run_backfill`(无日期守卫),15:05–24:00 每 5min 跑一遍、pending 时每条打 4 次全市场拉,1.6G ECS 整晚空耗+蹭限频。**故必须有每交易日一次的触发节流**:挂进 `last_eod_date` 守卫块(优先),或独立 `last_backfill_date` 守卫;UNIQUE 只作落库兜底、不作触发节流。
+- `POST /candidates/refresh` 端点(经 `_recompute_candidates`)**保留不动**——删自动 tick 后它是**唯一**刷新途径。
+- C1 验收:后端 pytest 全绿(删自动 tick + `run_candidate_refresh` 相关测试改写/删除,回测回填测试仍绿——验证回填不依赖已删的 candidate tick、每交易日仅触发一次);手动 `POST /candidates/refresh` 仍正常产候选;EOD 持仓摘要推送不受影响(grep + 测试双证)。
+
+**C2 验收(前端·可选微调)**:候选页已有 trade_date 标新旧 + 手动刷新按钮(v1.3.0/阶段2 已做),**无需新功能**。可选:解释条/脚注文案微调为"候选为上次手动刷新结果,点刷新重算"(明确手动语义)。若无文案改动则本 Phase 前端零改动,仅需确认候选页刷新链路照常。
+
+---
+
+**接口契约汇总(v1.3.1 新增/变更)**:
+| 端点 | 方法 | 变更 | 形状 |
+|---|---|---|---|
+| `/api/v1/screen/config` | GET | **新增** | `{config: 全量活配置(扁平单层), defaults: DEFAULT(扁平), updated_at:str|null}` |
+| `/api/v1/screen/config` | PUT | **新增** | in `{config: 部分/全部键}`(空 `{}`=恢复默认清行) → 逐键夹紧存增量 → out `{ok:bool, config: resolve 后全量}` |
+| `/api/v1/candidates` | GET | 变更 | candidate dict 新增可选 `warnLevel:"high"|"amber"|null`(**经 candidates 缓存表 `warn_level` 列往返**,第四次 migration);`score`/`warn` 不变 |
+| `/api/v1/candidates/refresh` | POST | 不变 | 手动刷新入口(自动 tick 删除后成为唯一刷新途径) |
+
+**待 v1.4(本版不碰,留指针)**:② 持仓教练深判重做(层2 盘中资金 T-1 失真 + 实时化边界:价/pnl/量/涨幅/VWAP 可实时、主力资金盘中缺)、③ 盘中选股独立板块(App 盘后/盘中分离,Level-2 资金缺口决策)。②③ 共享"实时价可得、实时资金不可得"同一数据现实,可能共用实时数据层。
 
 ## 4b. 客户端契约(设计稿钉死,阶段 1+ 生效)
 
@@ -108,6 +243,7 @@
 - **阶段3 部署前置(高危迁移·首次真 migration 前必做)**:部署阶段3 前,ECS 上先 `sqlite3 linon.db "SELECT COUNT(*) FROM trades;"` **实测线上真实行数**(别盲信"设计假设空仓",若真有历史行则那些行 name/note=NULL,`GET /memory` 已兜底回 code),并 `cp linon.db linon.db.bak-YYYYMMDD` **备份一次**再跑 `_ensure_trades_columns` 的 ALTER。零成本兜底,标准高危区施工姿势。
 - **阶段3.1 部署前置(第二次真 migration,candidates 表加 score 列)**:部署阶段3.1 前 `cp linon.db linon.db.bak-YYYYMMDD` 备份一次,再让服务重启触发 `_ensure_candidates_columns` 的 ALTER(幂等、只 log 不 re-raise)。`candidates` 是每日全量替换缓存、迁移风险低于 trades,但备份照旧做(§4.5)。
 - **v1.3.0 部署前置(第三次真 migration,🔴高危·positions/trades 均有真实交易数据)**:部署 v1.3.0 前 `cp linon.db linon.db.bak-YYYYMMDD` 备份一次(比前两次更重要——positions/trades 是真实持仓/成交,非缓存),再让服务重启触发 `_ensure_v130_columns` 的 ALTER(`positions.industry` + `trades.qty/fee/net_pnl_amount`,幂等、只 log 不 re-raise)。存量已闭合 trades 的新列为 NULL(净额契约 nullable、原样传 null → 客户端显"—/未知",复盘 `netPnlTotal` 只 sum 非空行,不 500);存量 holding 持仓 industry=NULL(相关性护栏对 NULL 行业 → 跳过、降级不误报)。**行业映射预热**:v1.3.0 起 lifespan 启动/`GET /positions/correlation` 端点承担 `load_industry_map()` 预热,**开仓路径绝不联网**(只读缓存,冷缓存 industry 落空串,候选刷新回填)。
+- **v1.3.1 部署前置(第四次真 migration,`candidates.warn_level` 列)**:部署 v1.3.1 前 `cp linon.db linon.db.bak-YYYYMMDD` 备份一次,再让服务重启触发 `_ensure_candidates_columns` 扩展的 ALTER(加 `candidates.warn_level TEXT`,幂等、只 log 不 re-raise)。`candidates` 是每日全量替换缓存、迁移风险低(旧行 warn_level=NULL → 输出省键 → 客户端 nil,前向兼容),备份照旧做(同阶段3.1 惯例)。**另**:v1.3.1 建 `screen_config` 表走 `CREATE TABLE IF NOT EXISTS`(非 ALTER,零风险),无额外前置。
 - **prod 端到端完整闭环**(阶段1 收尾):本期 sandbox 链路已验通;剩 App 切 prod 环境 + 填 prod `API_TOKEN`(已生成)→ 注册 device token 到 prod DB → 真机开仓/监控真推完整走一遍。
 - ~~**阶段2 部署到 ECS**~~:✅ 已部署上线(2026-06-28)。修两枚真环境坑(见 §6 + CLAUDE.md 坑4/5):① `sync.sh` `--exclude 'data/'` 误排 `app/data/`(阶段0/1 起数据层从没上 ECS)→ 锚定 `/data/`;② tushare `set_token` 写家目录炸 nologin `linon` 用户 → 改 `pro_api(token)` 直传。验通:refresh 71 候选 degraded=false、**内存峰 926MB/swap 0**(那台紧箱子扛得住)、`/analyze` 真 DeepSeek 合法卡、公网 HTTPS 200。`sync.sh`+`tushare_client.py` 两处修复 + 阶段2 全量**已 commit**(`716af79`)。
 - **Tushare token / DeepSeek key 录入 ECS `.env`**(阶段2 部署前):两把真 key 已由用户提供、本地 `backend/.env` 已填(gitignored、未进任何 tracked 文件,供本地冒烟);**ECS `.env` 仍需写入 `TUSHARE_TOKEN`/`DEEPSEEK_API_KEY`** 部署后功能才生效(无 token→候选 `degraded:true` 空列表;无 key→深判降级占位卡,均不崩)。国内 ECS 直连 `api.deepseek.com` 无障碍。注意 **Tushare 聚合数据发布有几天到约一周延迟、会逐步补齐**(订正旧"滞后到 2026-05-06"误判;选股资金源已切东财 `moneyflow_dc`,6000 积分给到上一交易日,见 §6 变更日志)。
@@ -272,4 +408,6 @@
 - **[2026-07-02] 深析资金源修正:切东财 `moneyflow_dc`(6000 积分)+ fund_asof 如实标注(真环境·已上线)**:用户发现深析卡「主力净流出」与候选列表「+4473万流入」及其同花顺 App 相反。查因:**深析层 `analyze.py` 误用原始 `moneyflow`(同花顺式,与东财口径不同、能符号相反),没用上 6000 积分买的东财 `moneyflow_dc`**;且 `fund_asof` 写死 `prev_trading_day`,盘后把 07-02 的数据误标成 07-01。实测四源(用户同花顺 +1627 / 东财 +2657 / 原始 moneyflow −2102 / Tushare 同花顺源 moneyflow_ths −2105)确认"主力资金"无统一标准、各家口径不同,东财是唯一与用户方向一致且干净的。**修**:① `analyze.py` 深析资金源切 `ts_moneyflow_dc`(`_fetch_fund` 兼容 `net_amount`/`net_mf_amount` 字段);② `fund_asof` 取实际数据最新交易日(盘后=今日、盘中=上一交易日),失败才退回占位;③ `prompt.py` 去掉写死"截至上一交易日",正文聚焦资金强弱、日期由客户端标签权威显示;④ 客户端文案改"资金面 = 截至 {date} EOD · 东财主力口径(非盘中实时)"。pytest 309 / macOS build 无回归。三文件热补丁 scp 到 ECS + restart,端到端验通:002184 现返 **fund_asof=07-02、近3日+4473万流入、当日+2657万、verdict 可进**、正文无"上一交易日"。CLAUDE.md 资金时序两条同步订正。
 - **[2026-07-02] v1.2.1 完工收口并上线**:新增统一 `POST /chat` 多轮对话端点(不动 `/analyze`/`/coach`,回测链路与教练红橙卡照旧)+ 对话 prose reply + 旁路 verdict 落库(仅首条候选对话且非降级才落,堵覆盖式污染)+ 对话专属超时 25s×2 + 双端候选行改真「深析」按钮唯一入口 + 初始深析对话化 + composer 追问真接 DeepSeek + 删 `.analysis` 结构化卡死代码(`DeepAnalysisCard` 本体留供快照测试)。走完整工作流:planner→plan-critic 一轮修订(3 致命堵死:对话专属超时/降级不落库门槛/mode 按业务状态判非 UI 状态)→builder(Phase A–C)→reviewer(致命 0、2 重要——coach 区间措辞按 pnl 派生、事实缓存条件改 and——均已修)。门禁:后端 pytest 337、客户端 XCTest 49、双端 `BUILD SUCCEEDED`。**两步全量部署**(先补 store 拆包重构首次真上生产、再上 v1.2.1 新增)端到端验通:`/chat` 生产返 181 字自由对话、fund_asof 07-02、东财资金流入正常。全文 `archive/v1.2.1_plan.md` + `archive/REVIEW_REPORT_v1.2.1.md`。
 - **[2026-07-03] v1.3.0(实战反馈四件套)完工收口**:四条用户实战反馈——② 三仓相关性护栏(行业 Tushare 口径·只提示不拦·只在买入路径)、④ 交易成本自动化+净额复盘(🔴高危·金额计算+第三次真 migration)、⑤ 候选放开固定 20(删满仓闭门)、⑥ 导出同花顺 TXT(纯前端)。⑦选股大改+③买入理由结构化推迟 v1.3.1。走完整工作流:planner→plan-critic(零致命3重要8建议·修订)→builder-pro(Phase B高危)+主会话Opus复审→builder(后端A+C)→builder(前端C3+D+E)→reviewer(Fable·1 致命[URL `?` 编码坏致相关性护栏生产静默失效]→已修/2 重要/6 建议)→主会话审后修复。**关键决策/偏离**:Phase A 开仓路径绝不联网(只读 `industry_of` 缓存,预热挪到 correlation 端点 + 候选刷新,lifespan 不预热免单测联网);Phase B `close_position` 保持返 int(trade_id)、清仓端点经 `_read_trade_flags` 回读两键,净额 nullable 三态(旧 NULL 不兜 0);审后修复致命#1(`get()` 把 `?` 编码成 `%3F` 致 correlation/review?week= 真后端 404、护栏静默失效)+ 🟡1 同族 + 🟡2 净额展示到分 + 🔵1 行业映射自愈,已修复并补门禁单测。门禁:后端 pytest 337→378、客户端 XCTest 49→65、双端 `BUILD SUCCEEDED`;新增端点 1 个 `GET /positions/correlation`;第三次真 migration `positions.industry`+`trades.qty/fee/net_pnl_amount`。全文 `archive/v1.3.0_plan.md` + `archive/REVIEW_REPORT_v1.3.0.md`。
+- **[2026-07-05] v1.3.1(盘后选股完善)立项**:§4 落定 3 块 8 Phase——**A 新选股逻辑**(A1 rules/form 新因子纯函数 / A2 fetch/pipeline 接线 / A3 前端 warn 分级)、**B 选股配置可调化**(B1 新表 `screen_config` 存 JSON 单行 / B2 `GET|PUT /screen/config` + 校验合并 / B3 客户端调参屏)、**C 刷新改手动**(C1 删 15:35 自动 tick,保留 EOD 摘要 + 回测回填 / C2 前端可选文案微调)。**关键选型**:① 删高位 ≥100% 硬排除改只标注(红/琥珀分级,新增 `warnLevel` 前向兼容字段);② 粗筛/排序量比口径接 `daily_basic.volume_ratio`(现成字段替自算放量);③ 排序换 9 因子集(量比0.30/位置健康距60日高点0.16/换手健康[7,15]%0.14/VWAP0.10/横盘突破0.10/市值弹性[50,500]亿0.08/活跃0.06/资金0.06/单日软闸-0.06,正权和1.00),**`pos_health=today_close/max(60日高)` 替旧 `low_position`**(修反向偏好左侧下跌票);④ 横盘突破 = 近25日振幅<15%+今日突破24日上沿+量比≥1.5;⑤ **配置成新单一源、rules 常量降为默认/fallback**,存储 = SQLite `screen_config` 表单行 JSON(`CREATE TABLE IF NOT EXISTS` 非 ALTER),`resolve` 默认浅合并用户覆盖 + 逐字段校验夹紧 + 权重和归一,非法配置逐字段回退默认绝不崩;⑥ 删自动 tick 后手动 `POST /candidates/refresh` 成唯一刷新途径,回测回填移出 refresh if 块改自扫描防重。**依赖**:B 整体在 A 之后(配置字段须覆盖 A 新因子);A 与 C 可并行。**plan-critic 重点审面**:B1 建表 + B2 配置校验/优先级/非法降级(新单一源不能有洞)。
+- **[2026-07-05] v1.3.1 plan-critic 修订(1 致命+6 重要+6 建议,全吸收)**:**致命#1** warnLevel 缓存链路断层(`GET /candidates` 读 candidates 缓存表、`upsert_candidates` 白名单 INSERT 静默丢 warnLevel、表无 pct_60d 派生不出)→ 拆出 **Phase A2.5**:candidates 加 `warn_level` 列(**第四次真 migration**,扩 `_ensure_candidates_columns`)+ 三处同步(`_CANDIDATE_KEYS`/INSERT/输出)+ **穿透缓存回环测试**封死断层 + §5 部署前置。**6 重要**:#2 config 形状钉死(扁平单层键注册表 `SCREEN_CONFIG_SPEC`、PUT 存增量不归一、归一只在 resolve 全量后、恢复默认=PUT 空清行);#3 生效机制=**显式穿参 cfg dict 进刷新链路、禁 monkeypatch 常量**、深判层不吃用户配置;#4 NaN 守卫(Tushare 缺值是 NaN,`float(x or 0)` 拦不住、`math.isfinite`+`pd.isna` 守卫);#5 breakout 振幅窗口**排除今日**(否则今日=最高使振幅退化、越突破越判 False);#6 ≥100% 票 `high_warn_text` 补红级文案;#7 回填触发防重(自扫描幂等防落库不防打 Tushare,挂 `last_eod_date` 块每交易日一次)。**6 建议全收**:#8 `DEFAULT_SCREEN_CONFIG` 引用构造+等值断言;#9 pos_health `len<20→0.0`;#10 展示口径解耦(`volMultiple` 仍自算放量);#11 `run_candidate_refresh` 是死码直接删;#12 组合效应(删硬排除+奖励贴高点同向)标"预期非回归"。修订全落 §4 对应 Phase。
 - **[2026-07-04] v1.3.0 部署上线 ECS**:第三次真 migration(`_ensure_v130_columns`)幂等落地,**项目首次非空仓部署**(存量 3 持仓 + 0 trades,`cp` 备份 `linon.db.bak-20260704-203407` 校验后再动)。重启 health 2s 就绪(监控空档极短);端到端验通:② `GET /positions/correlation?code=600519`→`白酒`/conflict:false·200(存量 3 持仓 industry=NULL 护栏跳过、逐行无损)、⑤ 满仓 `GET /candidates` 仍返 20 只 degraded=false。内存 780M/1612M·swap 0。**④净额需真实清仓触发(列已就位)、⑥导出纯客户端;客户端 v1.3.0 UI 尚未 Release 换包(iOS 真机留用户 Xcode 分发)**。回滚锚 = DB 备份 + GitHub `da045c1`。运维详情 `~/Lino/hz_info.md`。
