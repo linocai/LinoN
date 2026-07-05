@@ -72,9 +72,15 @@ def _fetch_form(
     raw_closes = [float(x) for x in df["close"].tolist()]
     vols = [float(x) for x in df["vol"].tolist()]
     trade_dates = [str(x) for x in df["trade_date"].tolist()]
-    # 前5交易日日均量(手,不复权;v1.4 Phase B 盘中量能折算基准,与选股放量口径同源
-    # 即 compute_form 内部 vol_multiple 用的 vols[1:6] 窗口——排除今日,取紧邻前5日)。
-    _prev5 = vols[1:6]
+    # 前5交易日日均量(手,不复权;v1.4 Phase B 盘中量能折算基准)。本字段只在盘中
+    # coach 组装快照时被消费(analyze_stock/chat_stock 的 is_trading 分支),此时
+    # Tushare daily 当日行尚未收录,vols[0] 是 T-1——按 plan §4 Phase C 字面口径
+    # 「取最近 5 条」(=T-1..T-5)取 vols[:5](审后修复 🟡#2,原 vols[1:6] 会跳过 T-1
+    # 取 T-2..T-6,系统性抬高折算量比)。注意:此窗口与 compute_form 内部
+    # vol_multiple 用的 vols[1:6](EOD 场景 vols[0]=今日,故排除今日取前5日)口径
+    # 刻意不同——两者调用时机不同(此为盘中调用、彼为 EOD 调用),分母对应的"前5日"
+    # 实际是同一组交易日。
+    _prev5 = vols[:5]
     prev5_avg_vol = round(sum(_prev5) / len(_prev5), 1) if _prev5 else 0.0
     # amount(千元,阶段3.1 VWAP 信号1);单票 daily 有 amount 列,缺列/缺值退化 0.0(vwap_ok False)。
     amounts = [float(x or 0.0) for x in df["amount"].tolist()] if "amount" in df.columns else None
@@ -331,10 +337,13 @@ def chat_stock(
     }
 
     # v1.4 Phase B:同 analyze_stock,仅 coach + 盘中 + 有 Quote 才组装(candidate 不组装)。
+    # 审后修复 🟡#3:build_intraday_snapshot 的 now 形参要 datetime(供 elapsed_trading_
+    # minutes 调 .time()),本函数的 `now` 形参是 date(供 fund_asof_date/事实缓存键)——
+    # 两者类型不同,不可混用;与 analyze_stock 对齐直接用 datetime.now()。
     if mode == "coach" and is_trading and intraday_quote is not None:
         context["intraday"] = intraday.build_intraday_snapshot(
             intraday_quote, facts["form"].get("prev5_avg_vol", 0.0),
-            now=now or datetime.now(), is_trading=True,
+            now=datetime.now(), is_trading=True,
         )
 
     try:

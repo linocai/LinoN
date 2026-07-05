@@ -69,7 +69,10 @@ struct CandidatesViewIOS: View {
     }
 
     /// v1.4 Phase D4:「盘中确认」按钮——初始可点(建议#9:客户端不自判日历/时段),
-    /// 拉回 isTrading=false 才禁用 + 标注非交易时段(时段真值全由后端 isTrading 定)。
+    /// 拉回 isTrading=false 只**变暗 + 标注非交易时段**(视觉提示),不真禁用点击
+    /// (🟡#1 审后修复:真禁用会致 app 会话内永久 brick——无清空/重置点,用户盘前/
+    /// 收盘后误点一次就再也点不动,只能杀 app。时段真值全由后端 isTrading 定,允许
+    /// 用户随时再点重查、以最新响应为准)。仅"拉取中"才真禁用(防重复点击)。
     private var intradayButton: some View {
         Button(action: { Task { await model.loadIntradayConfirm() } }) {
             Group {
@@ -81,15 +84,16 @@ struct CandidatesViewIOS: View {
             }
             .font(.system(size: 16, weight: .semibold))
             .frame(width: 40, height: 40)
-            .background(Circle().fill(intradayButtonDisabled ? LN.chipNeutral : LN.cardBg))
+            .background(Circle().fill(intradayButtonDimmed ? LN.chipNeutral : LN.cardBg))
             .overlay(Circle().stroke(LN.hairline, lineWidth: 0.5))
-            .foregroundStyle(intradayButtonDisabled ? LN.textTertiary : LN.accent)
+            .foregroundStyle(intradayButtonDimmed ? LN.textTertiary : LN.accent)
         }
         .buttonStyle(.plain)
-        .disabled(intradayButtonDisabled)
+        .disabled(model.intradayLoading)
     }
 
-    private var intradayButtonDisabled: Bool {
+    /// 视觉变暗态(非真禁用):拉取中,或上次响应 isTrading=false。
+    private var intradayButtonDimmed: Bool {
         model.intradayLoading || (model.intraday != nil && model.intraday?.isTrading == false)
     }
 
@@ -226,7 +230,8 @@ struct CandidatesViewMac: View {
         .overlay(Divider().overlay(LN.hairline), alignment: .bottom)
     }
 
-    /// v1.4 Phase D4:「盘中确认」工具栏按钮(同 iOS 语义:初始可点,isTrading=false 才禁用)。
+    /// v1.4 Phase D4:「盘中确认」工具栏按钮(同 iOS 语义:初始可点,isTrading=false 只
+    /// 变暗+标注、不真禁用——🟡#1 审后修复,允许随时再点重查,以最新响应为准)。
     private var intradayToolbarButton: some View {
         Button(action: { Task { await model.loadIntradayConfirm() } }) {
             HStack(spacing: 5) {
@@ -236,14 +241,15 @@ struct CandidatesViewMac: View {
             }
             .font(.system(size: 12, weight: .medium))
             .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 8).fill(intradayButtonDisabled ? LN.chipNeutral : LN.accent.opacity(0.10)))
-            .foregroundStyle(intradayButtonDisabled ? LN.textTertiary : LN.accent)
+            .background(RoundedRectangle(cornerRadius: 8).fill(intradayButtonDimmed ? LN.chipNeutral : LN.accent.opacity(0.10)))
+            .foregroundStyle(intradayButtonDimmed ? LN.textTertiary : LN.accent)
         }
         .buttonStyle(.plain)
-        .disabled(intradayButtonDisabled)
+        .disabled(model.intradayLoading)
     }
 
-    private var intradayButtonDisabled: Bool {
+    /// 视觉变暗态(非真禁用):拉取中,或上次响应 isTrading=false。
+    private var intradayButtonDimmed: Bool {
         model.intradayLoading || (model.intraday != nil && model.intraday?.isTrading == false)
     }
 
@@ -506,8 +512,11 @@ struct CandidateRow: View {
     // MARK: - v1.4 Phase D4:盘中续强叠加行(按 code join;无 intraday 结果时不显示,布局不塌)
 
     /// iOS:紧凑一行——现价/今日涨幅/高开幅度/站 VWAP 徽章/折算量比 + volNote 文案。
+    /// 🔵#1(审后修复):补齐「高开」字段(plan D.4 字段清单明列,此前 iOS 缺、macOS 有)。
+    /// 🔵#2(审后修复):`volNote=="non_trading"` 时整行不渲染——顶部已有非交易时段
+    /// banner(intradayNonTradingBanner),20 行逐行重复标注是噪声。
     @ViewBuilder private var intradayOverlayIOS: some View {
-        if let it = intraday {
+        if let it = intraday, it.volNote != "non_trading" {
             HStack(spacing: 8) {
                 if let price = it.price {
                     Text("盘中 \(LNFmt.price(price))")
@@ -517,6 +526,10 @@ struct CandidateRow: View {
                     Text(LNFmt.pct1(chg))
                         .font(.system(size: 11, weight: .semibold).monospacedDigit())
                         .foregroundStyle(chg >= 0 ? LN.up : LN.down)
+                }
+                if let openChg = it.openChgPct {
+                    Text("高开 \(LNFmt.pct1(openChg))")
+                        .font(.system(size: 10.5).monospacedDigit()).foregroundStyle(LN.textTertiary)
                 }
                 if let above = it.isAboveVwap {
                     vwapBadge(above)
@@ -529,9 +542,9 @@ struct CandidateRow: View {
         }
     }
 
-    /// macOS:同语义横排,略宽字号。
+    /// macOS:同语义横排,略宽字号。🔵#2(审后修复):non_trading 整行不渲染(同 iOS)。
     @ViewBuilder private var intradayOverlayMac: some View {
-        if let it = intraday {
+        if let it = intraday, it.volNote != "non_trading" {
             HStack(spacing: 10) {
                 Text("盘中续强").font(.system(size: 11, weight: .semibold)).foregroundStyle(LN.textTertiary)
                 if let price = it.price {

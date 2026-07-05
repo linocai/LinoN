@@ -349,7 +349,11 @@ def test_analyze_stock_degraded_form_has_vwap_placeholder(with_key):
 # —— v1.4 Phase B:coach 盘中上下文注入(analyze_stock/chat_stock + prompt) ————————
 
 def test_fetch_form_returns_prev5_avg_vol(with_key):
-    """_fetch_form 顺带吐 prev5_avg_vol(手,不复权,vols[1:6] 均值),供盘中折算基准。"""
+    """_fetch_form 顺带吐 prev5_avg_vol(手,不复权,vols[:5] 均值),供盘中折算基准。
+
+    审后修复 🟡#2:窗口按 plan §4 Phase C 字面口径「取最近 5 条」= vols[:5](本字段
+    只在盘中调用消费,此时 daily 当日行未收录,vols[0]=T-1,故不排除 vols[0])。
+    """
     captured = {}
 
     def _fake_deepseek(context):
@@ -362,8 +366,8 @@ def test_fetch_form_returns_prev5_avg_vol(with_key):
         deepseek_fn=_fake_deepseek,
         adj_factor_fn=_ok_adj_factor_flat,
     )
-    # _ok_daily: i==0 时 vol=3000,其余(含 i=1..5)vol=1000 → prev5_avg_vol=1000.0
-    assert captured["ctx"]["form"]["prev5_avg_vol"] == 1000.0
+    # _ok_daily: i==0 时 vol=3000,i=1..4 vol=1000 → vols[:5] 均值 = (3000+4*1000)/5 = 1400.0
+    assert captured["ctx"]["form"]["prev5_avg_vol"] == 1400.0
 
 
 def test_fetch_form_degraded_prev5_avg_vol_zero():

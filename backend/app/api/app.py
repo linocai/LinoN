@@ -359,14 +359,18 @@ _daily_fn = _default_daily_fn
 
 
 def _prev5_avg_vol(code: str, trade_date: str) -> float:
-    """单票前5交易日日均量(手,不复权),按 (code, trade_date) 缓存。失败/无数据 → 0.0。"""
+    """单票前5交易日日均量(手,不复权),按 (code, trade_date, today) 缓存。失败/无数据 → 0.0。
+
+    🔵#8(审后修复):键补 today 维度——候选刷新已改纯手动,多日未刷新时 trade_date
+    不滚动,若键只有 (code, trade_date) 会跨日命中旧 daily 数据(prev5 本应逐日滚动)。
+    """
     from datetime import date, timedelta
 
-    key = (code, trade_date)
+    today = date.today()
+    key = (code, trade_date, today.isoformat())
     if key in _PREV5_CACHE:
         return _PREV5_CACHE[key]
 
-    today = date.today()
     end = today.strftime("%Y%m%d")
     start = (today - timedelta(days=20)).strftime("%Y%m%d")   # 近20自然日,余量取够5个交易日
     try:
@@ -378,9 +382,11 @@ def _prev5_avg_vol(code: str, trade_date: str) -> float:
         return 0.0
     df = res.data.sort_values("trade_date", ascending=False).reset_index(drop=True)
     vols = [float(x) for x in df["vol"].tolist()]
-    # 与 analyze._fetch_form 同口径:vols[0] 是今日/最新已收盘日,前5日窗口为 vols[1:6]。
-    # 若数据里最新一行恰是"今日"(EOD 尚未收当日行),仍按此窗口取紧邻前5日,近似合理。
-    window = vols[1:6] if len(vols) > 1 else vols[:5]
+    # 本函数只在盘中(is_trading=True)调用(app.py:429),此时 Tushare daily 当日行尚未
+    # 收录,vols[0] 是 T-1(昨日)——按 plan §4 Phase C「取最近 5 条」字面口径(=T-1..T-5,
+    # 与 EOD 放量倍数"前5日均量"同分母)取 vols[:5](审后修复 🟡#2,原 vols[1:6] 会跳过
+    # T-1 取 T-2..T-6,系统性抬高折算量比、偏差方向利多怂恿追高)。
+    window = vols[:5]
     if not window:
         return 0.0
     avg = round(sum(window) / len(window), 1)
@@ -396,21 +402,26 @@ def candidates_intraday() -> dict:
     (进程内缓存)→ 逐票 build_intraday_snapshot 组装。窗口外:isTrading=false + 实时
     字段全 null,EOD 候选照常存在(此端点只回读时叠加数据,不影响 GET /candidates)。
     """
+    # 🔵#4(审后修复):isTrading 如实回传窗口真值(不因无候选就硬编 false)——degraded
+    # 单独表意"无候选缓存",避免交易时段内无候选时客户端误判为非交易时段(连带按钮
+    # 被误禁用)。isTrading/degraded 两个字段各自独立,客户端据此分别展示对应文案。
+    is_trading_now = intraday._is_intraday_window(datetime.now())
+
     td = store.latest_candidate_date()
     if td is None:
         return {
-            "ok": True, "isTrading": False, "tradeDate": "", "asof": "",
+            "ok": True, "isTrading": is_trading_now, "tradeDate": "", "asof": "",
             "degraded": True, "items": [],
         }
 
     all_rows = store.list_candidates(td)[: rules.CANDIDATE_LIMIT]
     if not all_rows:
         return {
-            "ok": True, "isTrading": False, "tradeDate": td, "asof": "",
+            "ok": True, "isTrading": is_trading_now, "tradeDate": td, "asof": "",
             "degraded": True, "items": [],
         }
 
-    is_trading = intraday._is_intraday_window(datetime.now())
+    is_trading = is_trading_now
     codes = [r["code"] for r in all_rows]
 
     quotes: dict = {}

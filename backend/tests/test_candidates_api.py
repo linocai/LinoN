@@ -609,14 +609,30 @@ def test_candidates_intraday_requires_auth(client):
     assert c.get("/api/v1/candidates/intraday").status_code == 401
 
 
-def test_candidates_intraday_no_candidates_degraded(client):
-    """无候选缓存 → degraded:true,items 空,isTrading=false。"""
-    c, _ = client
+def test_candidates_intraday_no_candidates_degraded(client, monkeypatch):
+    """无候选缓存 → degraded:true,items 空;isTrading 如实回传窗口真值(🔵#4 审后修复,
+    不因无候选就硬编 false——此处冻结在非交易时段验 isTrading=false,degraded 单独表意)。"""
+    c, app_mod = client
+    _freeze_now_intraday(monkeypatch, app_mod, "2026-06-23 20:00")
     r = c.get("/api/v1/candidates/intraday", headers=AUTH)
     assert r.status_code == 200
     b = r.json()
     assert b["ok"] is True and b["degraded"] is True
     assert b["items"] == [] and b["isTrading"] is False
+
+
+def test_candidates_intraday_no_candidates_but_trading_window_reports_true(client, monkeypatch):
+    """🔵#4(审后修复):交易时段内无候选缓存(td 存在但 0 行)→ isTrading 仍如实回传
+    true(不因 degraded 就硬编 false),避免客户端把"无候选"误判成"非交易时段"
+    (连带按钮误禁用)。"""
+    c, app_mod = client
+    monkeypatch.setattr(app_mod, "_pipeline_fn", lambda basis: ([], False, "ok", "2026-05-06"), raising=False)
+    c.post("/api/v1/candidates/refresh", headers=AUTH)   # 落 td=2026-05-06、0 行
+    _freeze_now_intraday(monkeypatch, app_mod, "2026-06-23 10:30")
+    r = c.get("/api/v1/candidates/intraday", headers=AUTH)
+    b = r.json()
+    assert b["degraded"] is True
+    assert b["isTrading"] is True
 
 
 def test_candidates_intraday_trading_window_injects_realtime_fields(client, monkeypatch):

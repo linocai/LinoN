@@ -128,46 +128,70 @@ final class IntradayConfirmAppModelTests: XCTestCase {
     }
 }
 
-// MARK: - 按钮禁用态派生(镜像 CandidatesViewIOS/Mac.intradayButtonDisabled 判定)
+// MARK: - 按钮态派生(镜像 CandidatesViewIOS/Mac 的 intradayButtonDimmed / .disabled 判定)
 //
-// 视图内 `intradayButtonDisabled` 是 private 计算属性,这里对镜像同款判定逻辑做断言,
-// 锁死"初始可点(intraday==nil)→isTrading=false 才禁用"的契约(建议#9)。
+// 🟡#1(审后修复):isTrading=false 不再真禁用(会 app 会话内永久 brick,无复活路径)——
+// 拆成两个独立判定:`intradayButtonDimmed`(视觉变暗,镜像 view 内同名计算属性)与
+// `intradayTrulyDisabled`(真禁用,只在拉取中,镜像 view 内 `.disabled(model.intradayLoading)`)。
+// 允许用户在"变暗"态下仍可点击重查,以最新响应为准(时段真值全由后端 isTrading 定)。
 
 @MainActor
-private func intradayButtonDisabled(_ m: AppModel) -> Bool {
+private func intradayButtonDimmed(_ m: AppModel) -> Bool {
     m.intradayLoading || (m.intraday != nil && m.intraday?.isTrading == false)
+}
+
+@MainActor
+private func intradayTrulyDisabled(_ m: AppModel) -> Bool {
+    m.intradayLoading
 }
 
 @MainActor
 final class IntradayButtonStateTests: XCTestCase {
 
-    /// 初始态(未拉取过)→ 按钮可点,不因"没数据"就禁用(客户端不自判日历/时段)。
+    /// 初始态(未拉取过)→ 不变暗、不禁用(客户端不自判日历/时段)。
     func testInitiallyEnabledBeforeAnyFetch() {
         let m = AppModel()
-        XCTAssertFalse(intradayButtonDisabled(m))
+        XCTAssertFalse(intradayButtonDimmed(m))
+        XCTAssertFalse(intradayTrulyDisabled(m))
     }
 
-    /// 拉取中 → 禁用(防重复点击)。
+    /// 拉取中 → 变暗 + 真禁用(防重复点击)。
     func testDisabledWhileLoading() {
         let m = AppModel()
         m.intradayLoading = true
-        XCTAssertTrue(intradayButtonDisabled(m))
+        XCTAssertTrue(intradayButtonDimmed(m))
+        XCTAssertTrue(intradayTrulyDisabled(m))
     }
 
-    /// 响应 isTrading=true → 仍可点(交易时段可重复确认)。
+    /// 响应 isTrading=true → 不变暗、可点(交易时段可重复确认)。
     func testEnabledWhenIsTradingTrue() {
         let m = AppModel()
         m.intraday = IntradayConfirmResult(ok: true, isTrading: true, tradeDate: "2026-07-06",
                                            asof: "x", degraded: false, items: [])
-        XCTAssertFalse(intradayButtonDisabled(m))
+        XCTAssertFalse(intradayButtonDimmed(m))
+        XCTAssertFalse(intradayTrulyDisabled(m))
     }
 
-    /// 响应 isTrading=false → 禁用 + 客户端应据此标注非交易时段(时段真值全由后端定)。
-    func testDisabledWhenIsTradingFalse() {
+    /// 响应 isTrading=false → 视觉变暗 + 标注非交易时段,但**仍可点击重查**(不真禁用,
+    /// 无复活路径的永久 brick 是审后修复要根除的问题)。
+    func testDimmedButNotTrulyDisabledWhenIsTradingFalse() {
         let m = AppModel()
         m.intraday = IntradayConfirmResult(ok: true, isTrading: false, tradeDate: "2026-07-06",
                                            asof: "", degraded: false, items: [])
-        XCTAssertTrue(intradayButtonDisabled(m))
+        XCTAssertTrue(intradayButtonDimmed(m))
+        XCTAssertFalse(intradayTrulyDisabled(m))
+    }
+
+    /// 复活路径:isTrading=false 后再次拉取回 isTrading=true → 变暗态解除(以最新响应为准)。
+    func testRecoversToEnabledAfterSubsequentTradingResponse() {
+        let m = AppModel()
+        m.intraday = IntradayConfirmResult(ok: true, isTrading: false, tradeDate: "2026-07-06",
+                                           asof: "", degraded: false, items: [])
+        XCTAssertTrue(intradayButtonDimmed(m))
+        // 模拟用户再次点击、后端本次回 isTrading=true(如开盘后)。
+        m.intraday = IntradayConfirmResult(ok: true, isTrading: true, tradeDate: "2026-07-06",
+                                           asof: "2026-07-06 09:30:05", degraded: false, items: [])
+        XCTAssertFalse(intradayButtonDimmed(m))
     }
 }
 
@@ -189,5 +213,62 @@ final class IntradayColorDerivationTests: XCTestCase {
     /// 负跌不染绿(数值派生,不受字符串前缀影响)。
     func testNegativeChgIsDownColor() {
         XCTAssertFalse(isUpColor(-1.5))
+    }
+}
+
+// MARK: - 盘中叠加行渲染判定(镜像 intradayOverlayIOS/Mac 的 `it.volNote != "non_trading"` 守卫)
+
+final class IntradayOverlayRenderTests: XCTestCase {
+
+    /// 与 intradayOverlayIOS/Mac 内 `if let it = intraday, it.volNote != "non_trading"` 逐字对齐。
+    private func shouldRenderOverlay(_ it: IntradayItem?) -> Bool {
+        guard let it = it else { return false }
+        return it.volNote != "non_trading"
+    }
+
+    /// 🔵#2(审后修复):非交易时段(volNote=="non_trading")→ 整行不渲染,顶部 banner 已够,
+    /// 避免 20 行逐行重复"非交易时段"噪声。
+    func testOverlayHiddenWhenNonTrading() {
+        let it = IntradayItem(code: "600001", name: "x", price: nil, chgPct: nil,
+                              openChgPct: nil, isAboveVwap: nil, intradayVolRatio: nil,
+                              volNote: "non_trading")
+        XCTAssertFalse(shouldRenderOverlay(it))
+    }
+
+    /// 其余 note(ok/early/no_base/closed)正常渲染。
+    func testOverlayShownForOtherNotes() {
+        for note in ["ok", "early", "no_base", "closed"] {
+            let it = IntradayItem(code: "600001", name: "x", price: 10, chgPct: 1.0,
+                                  openChgPct: 0.5, isAboveVwap: true, intradayVolRatio: 1.2,
+                                  volNote: note)
+            XCTAssertTrue(shouldRenderOverlay(it), "note=\(note) 应渲染叠加行")
+        }
+    }
+
+    /// 未拉取(nil)→ 不渲染。
+    func testOverlayHiddenWhenNil() {
+        XCTAssertFalse(shouldRenderOverlay(nil))
+    }
+}
+
+// MARK: - 「高开」字段(🔵#1 审后修复:iOS 补齐,与 macOS 对齐)
+
+final class IntradayOpenChgFieldTests: XCTestCase {
+
+    /// openChgPct 非 nil 时 iOS/macOS 叠加行均应展示「高开 x%」文案片段(镜像文案拼接)。
+    func testOpenChgLabelFormatsWithSign() {
+        let openChg = 1.05
+        let label = "高开 \(LNFmt.pct1(openChg))"
+        XCTAssertTrue(label.contains("高开"))
+        XCTAssertTrue(label.contains("1.0") || label.contains("1.1"))   // 容许四舍五入边界
+    }
+
+    /// openChgPct 为 nil(非交易/拉价失败)→ 不应尝试渲染该片段(由 `if let` 守卫,
+    /// 此处断言 IntradayItem 解码/构造允许该字段为 nil,不崩)。
+    func testOpenChgNilIsValid() {
+        let it = IntradayItem(code: "600001", name: "x", price: nil, chgPct: nil,
+                              openChgPct: nil, isAboveVwap: nil, intradayVolRatio: nil,
+                              volNote: "non_trading")
+        XCTAssertNil(it.openChgPct)
     }
 }
