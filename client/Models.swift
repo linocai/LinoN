@@ -139,6 +139,9 @@ struct Candidate: Identifiable, Codable {
     var turnover: String             // 换手
     var warn: String?                // 高位警告降级(非空则降级展示)
     var score: Int? = nil            // 阶段3.1:当日候选池相对分 0–100(展示;可选,前向兼容旧后端)
+    /// v1.3.1 A3:warn 分级("high"/"amber"/nil,前向兼容旧后端)。展示走此字段派生红/琥珀,
+    /// 绝不字符串解析 warn 文案判级(CLAUDE.md 红线)。
+    var warnLevel: String? = nil
     var analysis: DeepAnalysis
 }
 
@@ -171,6 +174,64 @@ struct ChatMessage: Identifiable, Codable {
     var role: ChatRole
     var text: String = ""
     var analysis: DeepAnalysis? = nil   // role == .analysis 时
+}
+
+// MARK: - v1.3.1 Phase B3:选股配置(GET/PUT /api/v1/screen/config;21 键扁平单层)
+
+/// 选股配置扁平字典(21 键=9 权重+12 阈值,与后端 `SCREEN_CONFIG_SPEC` 键名逐字对齐)。
+/// 用 `[String: Double]` 承载(建议#形状之一):字段随后端迭代增删时前向兼容——
+/// 缺键的键在 UI 侧用 `ScreenConfigSpec.defaults` 兜底,不因新增/缺失键崩解码。
+/// `active_lookback_days` 后端是 int,JSON 数字层面用 Double 解码不失真(展示时四舍五入)。
+typealias ScreenConfig = [String: Double]
+
+/// 键注册表(键名 / 中文标签 / 类别 / 客户端侧滑块步进范围)。范围仅供 UI 交互参考——
+/// 真正的越界夹紧在后端 `validate_screen_config` 做,客户端范围只是不让用户瞎拖到离谱值,
+/// 提交后仍以后端回填的夹紧值为准(不本地假装夹紧)。
+enum ScreenConfigCategory: String { case weight, threshold }
+
+struct ScreenConfigField {
+    let key: String
+    let label: String
+    let category: ScreenConfigCategory
+    let range: ClosedRange<Double>
+    let step: Double
+    let isInteger: Bool
+    let unit: String   // 展示后缀,如 "%"/"亿"/"天"/""
+}
+
+/// 21 键顺序与展示分组,对齐后端 `SCREEN_CONFIG_SPEC`(plan §4 Phase B config 形状表)。
+enum ScreenConfigSpec {
+    static let weightFields: [ScreenConfigField] = [
+        .init(key: "vol_ratio", label: "量比", category: .weight, range: 0...1, step: 0.01, isInteger: false, unit: ""),
+        .init(key: "pos_health", label: "位置健康(距高点)", category: .weight, range: 0...1, step: 0.01, isInteger: false, unit: ""),
+        .init(key: "turnover", label: "换手健康", category: .weight, range: 0...1, step: 0.01, isInteger: false, unit: ""),
+        .init(key: "vwap", label: "站 VWAP", category: .weight, range: 0...1, step: 0.01, isInteger: false, unit: ""),
+        .init(key: "breakout", label: "横盘突破", category: .weight, range: 0...1, step: 0.01, isInteger: false, unit: ""),
+        .init(key: "mv_elastic", label: "市值弹性", category: .weight, range: 0...1, step: 0.01, isInteger: false, unit: ""),
+        .init(key: "active", label: "近期活跃", category: .weight, range: 0...1, step: 0.01, isInteger: false, unit: ""),
+        .init(key: "fund", label: "资金面", category: .weight, range: 0...1, step: 0.01, isInteger: false, unit: ""),
+        .init(key: "day_surge", label: "单日软闸(罚项)", category: .weight, range: -1...0, step: 0.01, isInteger: false, unit: ""),
+    ]
+
+    /// 正权 8 项(day_surge 是负权罚项,不参与"权重之和"提示)。
+    static let positiveWeightKeys: [String] = weightFields.filter { $0.key != "day_surge" }.map(\.key)
+
+    static let thresholdFields: [ScreenConfigField] = [
+        .init(key: "vol_ratio_min", label: "量比下限", category: .threshold, range: 1...5, step: 0.1, isInteger: false, unit: ""),
+        .init(key: "turnover_lo", label: "换手健康带下限", category: .threshold, range: 0...50, step: 0.5, isInteger: false, unit: "%"),
+        .init(key: "turnover_hi", label: "换手健康带上限", category: .threshold, range: 0...50, step: 0.5, isInteger: false, unit: "%"),
+        .init(key: "mv_lo", label: "市值弹性带下限", category: .threshold, range: 0...2000, step: 5, isInteger: false, unit: "亿"),
+        .init(key: "mv_hi", label: "市值弹性带上限", category: .threshold, range: 0...2000, step: 5, isInteger: false, unit: "亿"),
+        .init(key: "mv_floor", label: "市值微盘 floor", category: .threshold, range: 0...2000, step: 5, isInteger: false, unit: "亿"),
+        .init(key: "breakout_range_max", label: "横盘振幅上限", category: .threshold, range: 0...1, step: 0.01, isInteger: false, unit: ""),
+        .init(key: "breakout_vol_ratio_min", label: "突破量比下限", category: .threshold, range: 1...5, step: 0.1, isInteger: false, unit: ""),
+        .init(key: "day_outflow_floor", label: "单日主力出货下限", category: .threshold, range: -20000...0, step: 100, isInteger: false, unit: "万"),
+        .init(key: "day_surge_warn_pct", label: "单日软闸阈", category: .threshold, range: 0...20, step: 0.5, isInteger: false, unit: "%"),
+        .init(key: "active_lookback_days", label: "活跃回看天数", category: .threshold, range: 1...60, step: 1, isInteger: true, unit: "天"),
+        .init(key: "limit_up_pct", label: "涨停判定阈", category: .threshold, range: 0...20, step: 0.1, isInteger: false, unit: "%"),
+    ]
+
+    static let allFields: [ScreenConfigField] = weightFields + thresholdFields
 }
 
 // MARK: - 交易日历原语(对齐 PROJECT_PLAN Phase 0.5;持仓天数靠它按需算)

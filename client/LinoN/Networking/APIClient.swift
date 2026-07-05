@@ -127,6 +127,7 @@ private struct CandidateListDTO: Decodable {
     let turnover: String
     let warn: String?
     let score: Int?    // 阶段3.1:当日相对分(可选;新客户端连旧后端无此字段 → nil,前向兼容不解码失败)
+    let warnLevel: String?   // v1.3.1 A3:"high"/"amber"/nil(可选,前向兼容旧后端无此字段)
 }
 
 private struct CandidatesListResponse: Decodable {
@@ -277,6 +278,35 @@ private struct MemoryResponse: Decodable {
 
 struct ReviewNoteBody: Encodable { let note: String }
 
+// MARK: - v1.3.1 Phase B3:选股配置(GET/PUT /api/v1/screen/config)
+
+/// PUT 请求体:body = {config: 部分/全部键}(空 dict = 恢复默认,后端清用户行)。
+struct ScreenConfigPutBody: Encodable { let config: ScreenConfig }
+
+/// GET /api/v1/screen/config 响应:{config, defaults, updated_at}。
+struct ScreenConfigGetResult {
+    let config: ScreenConfig      // 全量已 resolve(合并+归一+夹紧)后的活配置
+    let defaults: ScreenConfig    // DEFAULT_SCREEN_CONFIG(供"恢复默认"UI 参照)
+    let updatedAt: String?
+}
+
+private struct ScreenConfigGetResponse: Decodable {
+    let config: ScreenConfig
+    let defaults: ScreenConfig
+    let updated_at: String?
+}
+
+/// PUT /api/v1/screen/config 响应:{ok, config}(config = resolve 后全量活配置)。
+struct ScreenConfigPutResult {
+    let ok: Bool
+    let config: ScreenConfig
+}
+
+private struct ScreenConfigPutResponse: Decodable {
+    let ok: Bool
+    let config: ScreenConfig
+}
+
 struct AlertAckRequest: Encodable {
     let action: String     // "marked_close" | "dismissed"
 }
@@ -388,6 +418,7 @@ actor APIClient {
                       flow: dto.flow, turnover: dto.turnover,
                       warn: (dto.warn?.isEmpty == false) ? dto.warn : nil,
                       score: dto.score,   // 阶段3.1:可选;nil → CandidateRow 不显示徽章
+                      warnLevel: dto.warnLevel,   // v1.3.1 A3:可选;nil → CandidateRow 展示板块标签
                       analysis: placeholder)
         }
         return CandidatesResult(candidates: list, freeSlots: resp.free_slots,
@@ -464,6 +495,20 @@ actor APIClient {
         return true
     }
 
+    // —— v1.3.1 Phase B3:选股配置(GET 读活配置+默认 / PUT 存增量,走 makeURL 无 query)——
+    func fetchScreenConfig() async throws -> ScreenConfigGetResult {
+        let data = try await get("/api/v1/screen/config")
+        let r = try JSONDecoder().decode(ScreenConfigGetResponse.self, from: data)
+        return ScreenConfigGetResult(config: r.config, defaults: r.defaults, updatedAt: r.updated_at)
+    }
+
+    /// PUT 全部/部分键;空 dict `{}` = 恢复默认(后端清用户行,resolve 全回默认)。
+    func putScreenConfig(_ cfg: ScreenConfig) async throws -> ScreenConfigPutResult {
+        let data = try await put("/api/v1/screen/config", body: ScreenConfigPutBody(config: cfg))
+        let r = try JSONDecoder().decode(ScreenConfigPutResponse.self, from: data)
+        return ScreenConfigPutResult(ok: r.ok, config: r.config)
+    }
+
     // —— 阶段3:拉记忆 + 已平仓流水(GET /memory)——
     func fetchMemory() async throws -> MemoryResult {
         let data = try await get("/api/v1/memory")
@@ -521,6 +566,22 @@ actor APIClient {
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(body)
+        req.timeoutInterval = timeout
+        return try await send(req)
+    }
+
+    /// v1.3.1 Phase B3:PUT(同 post,仅 httpMethod 不同)。走 makeURL(此批端点无 query,
+    /// 但仍统一走 makeURL 免重蹈 v1.3.0 `appendingPathComponent` 编码坑)。
+    private func put<B: Encodable>(_ path: String, body: B, timeout: TimeInterval = 12) async throws -> Data {
+        try ensureToken()
+        guard let url = Self.makeURL(base: baseURL, path: path) else {
+            throw APIError.transport("无效 URL: \(path)")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONEncoder().encode(body)

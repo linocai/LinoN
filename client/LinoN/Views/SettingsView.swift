@@ -26,6 +26,7 @@ struct SettingsView: View {
 
     @State private var tokenRevealed = false
     @State private var check: SelfCheckState = .idle
+    @State private var showScreenConfig = false
 
     var body: some View {
         Form {
@@ -36,6 +37,7 @@ struct SettingsView: View {
             #if os(iOS)
             pushSection
             #endif
+            screenConfigSection
             footerSection
         }
         .formStyle(.grouped)
@@ -43,6 +45,53 @@ struct SettingsView: View {
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        // v1.3.1 Phase B3:iOS/macOS 统一走 sheet 呈现(macOS Settings 场景无 NavigationStack,
+        // NavigationLink 在此推不动;sheet 双端都能用,行为一致)。
+        .sheet(isPresented: $showScreenConfig) {
+            #if os(iOS)
+            NavigationStack {
+                ScreenConfigView(model: model)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { showScreenConfig = false }
+                        }
+                    }
+            }
+            #else
+            VStack(spacing: 0) {
+                HStack {
+                    Text("选股参数").font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                    Button("完成") { showScreenConfig = false }
+                }
+                .padding(16)
+                Divider()
+                ScreenConfigView(model: model)
+            }
+            .frame(width: 480, height: 560)
+            #endif
+        }
+    }
+
+    // MARK: - 选股参数入口
+
+    private var screenConfigSection: some View {
+        Section {
+            Button {
+                showScreenConfig = true
+            } label: {
+                HStack {
+                    Label("选股参数", systemImage: "slider.horizontal.3")
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.system(size: 12)).foregroundStyle(LN.textTertiary)
+                }
+            }
+            .buttonStyle(.plain)
+        } header: {
+            Text("选股")
+        } footer: {
+            Text("调整排序权重与阈值;保存后下次手动刷新候选生效。")
+        }
     }
 
     // MARK: - 环境

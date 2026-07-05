@@ -117,6 +117,13 @@ final class AppModel {
     /// 阶段3 G4:当前 coach 卡的复盘历史引用(带情绪第二人称;无历史破线 → nil,卡不显引用块)。
     var coachReviewRef: String? = nil
 
+    // —— v1.3.1 Phase B3:选股配置调参屏(SettingsView → ScreenConfigView)——
+    var screenConfig: ScreenConfig = [:]           // 当前(已 resolve)活配置,滑块/输入绑定此值
+    var screenConfigDefaults: ScreenConfig = [:]   // DEFAULT_SCREEN_CONFIG(供本地校验/兜底展示)
+    var screenConfigUpdatedAt: String? = nil
+    var screenConfigLoading = false
+    var screenConfigSaving = false
+
     // —— 模态 / 录入 / toast ——
     var modal: ModalKind? = nil
     var closeCode: String? = nil
@@ -571,6 +578,63 @@ final class AppModel {
             }
         }
         memoryLoading = false
+    }
+
+    // MARK: - v1.3.1 Phase B3:选股配置调参屏
+
+    /// 拉活配置(GET /screen/config)。降级不弹错(视图按空 dict 展示默认占位)。
+    func loadScreenConfig() async {
+        guard let client = clientProvider() else { return }
+        screenConfigLoading = true
+        do {
+            let r = try await client.fetchScreenConfig()
+            self.screenConfig = r.config
+            self.screenConfigDefaults = r.defaults
+            self.screenConfigUpdatedAt = r.updatedAt
+        } catch {
+            if case APIError.noToken = error {} else {
+                showToast("选股配置拉取失败", isError: true)
+            }
+        }
+        screenConfigLoading = false
+    }
+
+    /// 保存当前配置(PUT 全部当前值)→ 用响应(归一/夹紧后)回填 + 提示"下次刷新生效"
+    /// (不自动触发候选 refresh;客户端不自算归一,归一在后端 resolve)。
+    func saveScreenConfig() async {
+        guard let client = clientProvider() else {
+            showToast("未配置后端连接", isError: true); return
+        }
+        screenConfigSaving = true
+        defer { screenConfigSaving = false }
+        do {
+            let r = try await client.putScreenConfig(screenConfig)
+            self.screenConfig = r.config
+            showToast("已保存 · 下次手动刷新候选生效")
+        } catch {
+            showToast("保存失败,请重试", isError: true)
+        }
+    }
+
+    /// 恢复默认 = PUT 空 config `{}`(后端清用户行,resolve 全回默认)→ 用响应回填。
+    func restoreDefaultScreenConfig() async {
+        guard let client = clientProvider() else {
+            showToast("未配置后端连接", isError: true); return
+        }
+        screenConfigSaving = true
+        defer { screenConfigSaving = false }
+        do {
+            let r = try await client.putScreenConfig([:])
+            self.screenConfig = r.config
+            showToast("已恢复默认 · 下次手动刷新候选生效")
+        } catch {
+            showToast("恢复默认失败,请重试", isError: true)
+        }
+    }
+
+    /// 当前正权(排除 day_surge 罚项)之和,供 UI 提示"和≠1 时保存后端自动归一"。
+    var screenConfigPositiveWeightSum: Double {
+        ScreenConfigSpec.positiveWeightKeys.reduce(0.0) { $0 + (screenConfig[$1] ?? 0) }
     }
 
     // MARK: - 模态控制

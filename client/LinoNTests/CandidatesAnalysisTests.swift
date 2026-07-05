@@ -339,6 +339,92 @@ final class CandidateScoreDecodeTests: XCTestCase {
     }
 }
 
+// MARK: - v1.3.1 Phase A3:Candidate.warnLevel 可选解码(前向兼容 + 红/琥珀分级派生)
+
+final class CandidateWarnLevelDecodeTests: XCTestCase {
+
+    private func candidateJSON(warnLevel: String?) -> Data {
+        let warnLevelLine = warnLevel.map { "\"warnLevel\": \"\($0)\",\n" } ?? ""
+        return """
+        {
+          "id": "00000000-0000-0000-0000-000000000002",
+          "rank": 1, "name": "东方电缆", "code": "603606",
+          "sector": "海缆", "tag": "低位平台突破",
+          "price": 42.1, "chg": "+3.20%",
+          "volMultiple": "2.8x", "volPct": 90,
+          "flow": "+1.20亿", "turnover": "4.6%",
+          "warn": "60日累涨120%,极高位,追高高危",
+          \(warnLevelLine)"analysis": {
+            "form": {"value": "—", "tone": "neutral", "text": ""},
+            "fund": {"value": "—", "tone": "neutral", "text": ""},
+            "news": {"value": "—", "tone": "neutral", "text": ""},
+            "verdict": "观望", "plan": ""
+          }
+        }
+        """.data(using: .utf8)!
+    }
+
+    func testDecodesHighWarnLevel() throws {
+        let c = try JSONDecoder().decode(Candidate.self, from: candidateJSON(warnLevel: "high"))
+        XCTAssertEqual(c.warnLevel, "high")
+    }
+
+    func testDecodesAmberWarnLevel() throws {
+        let c = try JSONDecoder().decode(Candidate.self, from: candidateJSON(warnLevel: "amber"))
+        XCTAssertEqual(c.warnLevel, "amber")
+    }
+
+    func testDecodesOldResponseWithoutWarnLevelDoesNotFail() throws {
+        // 前向兼容:旧后端无 warnLevel 字段 → 解码不失败、warnLevel=nil(不因新字段挡住整列表解码)。
+        let c = try JSONDecoder().decode(Candidate.self, from: candidateJSON(warnLevel: nil))
+        XCTAssertNil(c.warnLevel)
+        XCTAssertEqual(c.code, "603606")
+    }
+}
+
+/// v1.3.1 Phase A3:红/琥珀分级派生契约——镜像 CandidateRow.warnOrSector/rowBackground 的
+/// switch 逻辑,断言分级严格走 `warnLevel` 字段而非解析 `warn` 文案(CLAUDE.md 红线)。
+private enum WarnLevelDerivation {
+    static func pillIsRed(_ c: Candidate) -> Bool { c.warn != nil && c.warnLevel == "high" }
+    static func pillIsAmber(_ c: Candidate) -> Bool { c.warn != nil && c.warnLevel != "high" }
+}
+
+final class WarnLevelDerivationTests: XCTestCase {
+
+    private func makeCandidate(warn: String?, warnLevel: String?) -> Candidate {
+        let neutral = AnalysisAxis(value: "—", tone: .neutral, text: "")
+        let a = DeepAnalysis(form: neutral, fund: neutral, news: neutral, verdict: .watch, plan: "")
+        return Candidate(rank: 1, name: "票", code: "600000", sector: "行业", tag: "",
+                         price: 10, chg: "+1.00%", volMultiple: "1.0x", volPct: 50,
+                         flow: "+0.1亿", turnover: "1.0%", warn: warn, warnLevel: warnLevel, analysis: a)
+    }
+
+    func testHighLevelDerivesRedPill() {
+        let c = makeCandidate(warn: "60日累涨120%,极高位,追高高危", warnLevel: "high")
+        XCTAssertTrue(WarnLevelDerivation.pillIsRed(c))
+        XCTAssertFalse(WarnLevelDerivation.pillIsAmber(c))
+    }
+
+    func testAmberLevelDerivesAmberPill() {
+        let c = makeCandidate(warn: "60日累涨65%,较高位,注意风险", warnLevel: "amber")
+        XCTAssertFalse(WarnLevelDerivation.pillIsRed(c))
+        XCTAssertTrue(WarnLevelDerivation.pillIsAmber(c))
+    }
+
+    /// 旧后端无 warnLevel(nil)但仍带 warn 文案 → 兜底走琥珀(现状行为),不因缺字段崩成红。
+    func testNilLevelWithWarnTextFallsBackToAmberNotRed() {
+        let c = makeCandidate(warn: "60日累涨65%,较高位,注意风险", warnLevel: nil)
+        XCTAssertFalse(WarnLevelDerivation.pillIsRed(c))
+        XCTAssertTrue(WarnLevelDerivation.pillIsAmber(c))
+    }
+
+    func testNoWarnShowsNeitherPill() {
+        let c = makeCandidate(warn: nil, warnLevel: nil)
+        XCTAssertFalse(WarnLevelDerivation.pillIsRed(c))
+        XCTAssertFalse(WarnLevelDerivation.pillIsAmber(c))
+    }
+}
+
 // MARK: - v1.3.0 Phase E:导出同花顺 TXT —— thsMarketSuffix 最长前缀优先判定
 
 final class ThsMarketSuffixTests: XCTestCase {

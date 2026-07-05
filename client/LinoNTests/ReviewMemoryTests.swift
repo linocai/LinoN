@@ -196,6 +196,13 @@ final class APIClientURLTests: XCTestCase {
         XCTAssertEqual(prod?.absoluteString, "https://ln.linotsai.top/api/v1/positions/correlation?code=000858")
     }
 
+    /// v1.3.1 Phase B3:screen/config 端点(无 query)同样走 makeURL,不回归。
+    func testMakeURLScreenConfigNoQuery() {
+        let base = URL(string: "http://127.0.0.1:8001")!
+        let url = APIClient.makeURL(base: base, path: "/api/v1/screen/config")
+        XCTAssertEqual(url?.absoluteString, "http://127.0.0.1:8001/api/v1/screen/config")
+    }
+
     /// 🟡2:净额展示到分(Phase B 逐分对账口径);nil→"—"(区分"没数据"vs"真0元")。
     func testNetAmountFormatting() {
         XCTAssertEqual(LNFmt.netAmount(nil), "—")

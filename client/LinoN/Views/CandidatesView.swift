@@ -381,7 +381,7 @@ struct CandidateRow: View {
             .fixedSize()
         }
         .padding(.horizontal, 15).padding(.vertical, 14)
-        .background(c.warn != nil ? LN.amber.opacity(0.04) : Color.clear)
+        .background(rowBackground)
     }
 
     // MARK: - macOS:横向列(# / 股票 / 现价涨幅 / 放量条·倍数 / 主力 / 换手 / 深析)
@@ -425,10 +425,19 @@ struct CandidateRow: View {
             analyzeButton.frame(width: 70, alignment: .trailing)
         }
         .padding(.horizontal, 16).padding(.vertical, 15)
-        .background(c.warn != nil ? LN.amber.opacity(0.04) : Color.clear)
+        .background(rowBackground)
     }
 
     // MARK: - 共享小部件
+
+    /// v1.3.1 A3:卡片背景——high 红系极浅、amber 琥珀极浅(现状)、无 warn 透明。
+    private var rowBackground: Color {
+        switch c.warnLevel {
+        case "high": return LN.down.opacity(0.04)
+        case "amber": return LN.amber.opacity(0.04)
+        default: return c.warn != nil ? LN.amber.opacity(0.04) : Color.clear
+        }
+    }
 
     private var rankChip: some View {
         Text("\(c.rank)")
@@ -465,8 +474,16 @@ struct CandidateRow: View {
         }
     }
 
+    /// v1.3.1 A3:warn 分级展示——`warnLevel=="high"` 红色警告 pill、`"amber"` 琥珀 pill(现状)、
+    /// nil 板块标签。分级严格走后端 `warnLevel` 字段派生,不字符串解析 `warn` 文案判级(CLAUDE.md 红线)。
     @ViewBuilder private var warnOrSector: some View {
-        if let warn = c.warn {
+        if let warn = c.warn, c.warnLevel == "high" {
+            Text("⚠ \(warn)")
+                .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(LN.down)
+                .padding(.horizontal, 8).padding(.vertical, 2)
+                .background(Capsule().fill(LN.down.opacity(0.12)))
+                .lineLimit(1)
+        } else if let warn = c.warn {
             Text("⚠ \(warn)")
                 .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(LN.amber)
                 .padding(.horizontal, 8).padding(.vertical, 2)
@@ -552,6 +569,7 @@ enum CandidatesCopy {
 
     static func footnote(_ m: AppModel) -> String {
         let shown = m.shownCandidates.count
-        return "已展示前 \(shown) 只(固定 Top 20)· 满仓也照常展示,买不买你自己判断"
+        // v1.3.1 C2:候选为上次手动刷新结果,明确刷新语义(自动 tick 已删,手动刷新为唯一途径)。
+        return "已展示前 \(shown) 只(固定 Top 20 · 上次手动刷新结果,点刷新重算)· 买不买你自己判断"
     }
 }
