@@ -54,6 +54,7 @@
 - **v1.3.0(实战反馈四件套)已完工收口**:四条用户实战反馈驱动的改动——② 三仓相关性护栏(行业 Tushare 口径·只提示不拦·只在买入路径)、④ 交易成本自动化+净额复盘(🔴高危·金额计算+第三次真 migration)、⑤ 候选放开固定 20(删满仓闭门)、⑥ 导出同花顺 TXT(纯前端)。⑦选股大改+③买入理由结构化推迟到 v1.3.1。走完整工作流:planner→plan-critic(零致命3重要8建议·修订)→builder-pro(Phase B高危)+主会话Opus复审→builder(后端A+C)→builder(前端C3+D+E)→reviewer(Fable·1 致命[URL `?` 编码坏致相关性护栏生产静默失效]→已修/2 重要/6 建议)→主会话审后修复。门禁:后端 pytest **337→378 全绿**(新增 41,Phase A 相关性 16 条 + Phase C 截断口径重写净增 3);客户端 XCTest **49→65 全绿**;双端 `BUILD SUCCEEDED`。新增端点 **1 个**:`GET /positions/correlation`。第三次真 migration:`positions.industry` + `trades.qty/fee/net_pnl_amount`(均 nullable 前向兼容)。全文 `archive/v1.3.0_plan.md` + `archive/REVIEW_REPORT_v1.3.0.md`。
 - **门禁数字**:**已发布 3 阶段**(阶段1+阶段2+v1.2.1,live `https://ln.linotsai.top`,阶段2 于 2026-06-28 上线、v1.2.1 于 2026-07-02 两步上线;阶段2.5/阶段3/阶段3.1 为纯后端/全栈小版本随部署链路一并上线;`app/db/store.py` 单文件在 ECS 已不存在,store 拆包首次真上生产;**v1.3.0 已部署上线(2026-07-04)**;**v1.3.1 已部署上线(2026-07-05)**)。**阶段4(K线/舆情/双端真机 E2E)待规划**。后端 pytest **450 全绿**(阶段1 基线 105 + 阶段2 新增 88 → 193 + 阶段2.5 新增 34 → 227 + 阶段3 新增 49 → 276 + 阶段3.1 新增 33 → 309 + v1.2.1 新增 28 → 337 + v1.3.0 新增 41 → 378 + v1.3.1 新增 72);客户端 XCTest **95 全绿**(17 + 阶段2 新增 15 → 32,阶段2.5 无前端改动,阶段3 新增 8 → 40,阶段3.1 新增 4 → 44,v1.2.1 新增 5 → 49,v1.3.0 新增 16 → 65,v1.3.1 新增 30);**双端 build iOS Simulator + macOS 各 `BUILD SUCCEEDED`**;真 key 活体冒烟过(Tushare 5490 行/茅台白酒归类符合假设;DeepSeek `json_object` 真输出夹紧成合法 DeepAnalysis;analyze/coach/chat 真 key curl 闭环;离屏快照逐屏目检候选行/满仓🔒/深析卡 fund_asof/教练红橙卡;阶段2.5 真 token 限频冒烟 65/65 天 adj_factor 全部成功,零限频失败,耗时 39s→45.5-45.7s)。阶段2 新增端点 **4 个**:`GET /candidates`、`POST /candidates/refresh`、`POST /candidates/{code}/analyze`、`POST /positions/{id}/coach`;阶段2.5 新增只读端点 **1 个**:`GET /candidates/outcomes`;阶段3 新增端点 **3 个**(`GET /review`、`POST /review/{week}/note`、`GET /memory`)+ `/coach` 新增可选字段 `review_ref`;阶段3.1 无新增端点,`GET /candidates` 候选 dict 新增可选展示字段 `score`(int,前向兼容);v1.2.1 新增端点 **1 个**:`POST /chat`;v1.3.0 新增端点 **1 个**:`GET /positions/correlation`;v1.3.1 新增端点 **2 个**:`GET/PUT /api/v1/screen/config`,`GET /candidates` 新增可选字段 `warnLevel`。**第四次真 migration**:`candidates.warn_level` 列;**新表**:`screen_config`。
 - **v1.3.1(盘后选股完善)已完工收口(已部署上线)**:三块——① 新选股逻辑(删高位硬排除改只标注红/琥珀分级、粗筛量比口径接 `daily_basic.volume_ratio`、排序换 9 因子集含距60日高点 `pos_health`/横盘突破 `breakout_ok`、warnLevel 经 candidates 缓存表往返=**第四次真 migration `warn_level` 列**)、② 选股配置可调化(档 B·App 内调参屏 + 新表 `screen_config` 存 JSON 增量 + `GET/PUT` 端点 + 显式穿参生效不 monkeypatch、rules 常量降级为默认值/fallback、深判层不吃配置)、③ 候选刷新改纯手动(删 15:35 自动 tick + `run_candidate_refresh` 死码,回填改挂 `last_eod_date` 守卫的 EOD 块)。持仓教练深判重做②/盘中选股独立板块③已定移 **v1.4**,本版不碰。走完整工作流:planner→plan-critic(1 致命[warnLevel 缓存断层]+6 重要+6 建议全吸收)→builder 三批(批1 后端 A+C/批2 后端 B/批3 前端)→reviewer(Fable·0 致命/3 🟡/8 🔵)→主会话审后修复(🟡#1 跨字段带内一致性 `_enforce_band_consistency` + 🟡#2 调参屏按钮加载态守卫 + 用户新增 `mv_mega_ceil` 可调化 500→1500)。门禁:后端 pytest **378→450 全绿**(批1+25/批2+40/批3 前端/审后+7);客户端 XCTest **65→95 全绿**;双端 `BUILD SUCCEEDED`。新增端点 **2 个**:`GET/PUT /api/v1/screen/config`。第四次真 migration:`candidates.warn_level` 列。新表:`screen_config`(`CREATE TABLE IF NOT EXISTS`,非 ALTER)。全文 `archive/v1.3.1_plan.md` + `archive/REVIEW_REPORT_v1.3.1.md`;8 🔵 建议入 §5。**已部署上线 2026-07-05**(第四次 migration + `screen_config` 建表幂等落地、479 候选历史无损;prod 验通:配置端点 22 键默认 + PUT/恢复默认清行、新 9 因子 refresh count=168、warnLevel amber 经缓存表往返;macOS 已 Release 换包,iOS 留用户;详见 `~/Lino/hz_info.md`)。
+- **v1.4 施工中**:Phase A(后端盘中数据层)已完工——新建 `backend/app/data/intraday.py`(4 个纯函数:`_is_intraday_window`/`elapsed_trading_minutes`/`intraday_vol_ratio`/`vwap_of`/`build_intraday_snapshot`),不自拉价不联网。门禁:后端 pytest **450→474 全绿**(新增 24 条,覆盖 plan 验收清单全部 14+ 项,含 VWAP 真实比例假 Quote 反向公式回归门)。下一步 Phase B(coach 盘中上下文注入)+ Phase C(候选盘中确认端点)可并行。
 - **上线即空仓**:无存量持仓迁移,无 legacy / 既往不咎机制,`positions` 从 0 行起。
 - **止损线机械派生**:`stop_line = buy_price × 0.95`,**纯派生、不落库**(-10% 极强趋势例外已砍,止损恒为 ×0.95;与持仓天数同样按读取时算,单一事实源),系统自动算,**拒绝用户手填**。
 - **ECS 现实**:`deploy@118.178.122.194:/opt/linon`,systemd **单 unit** `linon.service` **active**(端口 **8001**,监控作 app 内后台轮询、不另起进程),nginx `ln.linotsai.top` + certbot 证书;内存紧(1.6G+2G swap),已占端口 8000/8787/5432/80/443/8001;`.env`/`.p8` 均 600 `linon:linon`。
@@ -71,9 +72,140 @@
 | 4 收尾(**待规划**) | — | K 线/分时图、舆情展示、双端真机 E2E 打磨 |
 | V2(推后) | 历史行情重放 / 纪律陪练沙盒(陪练非裁判) | 临场纪律陪练 |
 
-## 4. 当前版本 Plan
+## 4. 当前版本 Plan(v1.4 · 盘中上下文:教练 + 候选续强确认)
 
-> 下一版本待规划。v1.3.1(盘后选股完善)已完工收口,全文见 `archive/v1.3.1_plan.md` + `archive/REVIEW_REPORT_v1.3.1.md`;②持仓教练深判重做 / ③盘中选股独立板块待 v1.4 立项。
+> 立项 2026-07-05。**核心前提(用户拍板)**:盘中主力资金层整个砍掉(用户自己肉眼看盘口),v1.4 **零新增外部数据源、零 schema migration、零新表**,只复用现有新浪/腾讯实时源 + 现有 Tushare EOD。两件事:② 给持仓教练/对话注入实时盘中上下文;③ 候选池「今日续强确认」视图(收窄=次日续强进场确认,非全市场盘中选股)。旧债一并收:两源盘中真复测。
+
+### 不动的契约(v1.4 全期铁律,builder 越界即回 planner)
+
+- **3 硬线**:止损 -5.0 触发 / 止盈 +15% / D4 强平(`count==4 ⟺ should_force_close`),口径与判定全不动;`hitStop` 展示阈 -4.9 不动。
+- **规则常量单一源** `app/db/store/constants.py`;选股规则单一源 `screen_config`/`rules.py`;v1.4 **不碰选股规则、不碰排序因子**。
+- **守味隔离**:教练/对话只注入中性 `history_digest`,**绝不注入 `review_ref`**(情绪串只回客户端展示)。
+- **绿涨红跌**(用户明确选择,勿"纠正");monitor「每源每 tick ≤1 拉」纪律不破。
+- **两源单位坑**(CLAUDE.md 数据源坑):归一后 `Quote.volume`=手、`Quote.amount`=元;VWAP=`amount/(volume×100)`(元/股,见技术选型钉死)用**归一后**字段,不碰原始报文。
+
+### 技术选型(本阶段定死,不留给施工)
+
+**盘中量能口径(定死,唯一)**:采用「**已开盘时长折算日量**」估算。
+- `elapsed_min` = 从 09:30 起已交易分钟数(**跨午休**:09:30–11:30=120min + 13:00–15:00=120min,共 240min;午休 11:30–13:00 定格在 120;`now<09:30`→0;`now≥15:00`→240)。**盘中窗口内**(见下"盘中窗口判定")才调用折算,午休时 `elapsed=120`、折算照常有效(用上午累计量)。
+- `projected_full_vol = current_vol / elapsed_min × 240`(current_vol 用归一后**手**数);`intraday_vol_ratio = projected_full_vol / prev5_avg_vol`(prev5_avg_vol = 前 5 交易日日均成交量手数,复用 Tushare `daily` 拉取,与选股放量口径同源)。
+- **边界(定死)**:① `elapsed_min < 60`(**早盘头 60min·建议#11**:含集合竞价噪声 + A 股早盘量能前置,10:30 前折算系统性高估、偏差方向恰好利多怂恿进场,故把 early 阈提到 60min 更保守)→ 折算不可靠,`intraday_vol_ratio` 置 `null` + 标 `note:"early"`(客户端显"开盘初,量能待观察");② `elapsed_min ≥ 240`(仅 `now==15:00` 收盘边缘可达,因窗口是 `<15:00`)→ 折算=当日实际全量,`note:"closed"`(近乎死分支,保留兜底不删);③ **盘中窗口外**(见下判定)整个视图降级 `note:"non_trading"`,不算折算;④ `prev5_avg_vol` 缺失/为 0 → `intraday_vol_ratio=null` + `note:"no_base"`。展示只给 `intraday_vol_ratio`(保留 1 位小数)+ note,**不承诺精度**(文案标"折算估算,非实时精确;早盘折算通常偏高")。
+- **不做**:「现量 vs 昨日同时段」(需分时历史,Tushare 免费口径不稳、成本高)——明确不选。
+
+**VWAP(定死,单位口径钉死·致命#1 修正)**:`vwap = amount / (volume × 100)`(**元/股**)——`Quote.amount` 归一后是**元**、`Quote.volume` 归一后是**手**(1 手=100 股),故须 ÷(volume×100) 才得每股均价,与 `Quote.price`(元/股)同口径可比。**先例互指**:`app/screen/form.py:173` `vwap=(today_amount×1000)/(today_vol×100)`——form.py 是**千元/手**故 ×1000;realtime 归一后已是**元/手**故只 ×100,**别照抄 form 的 ×1000 系数**。`is_above_vwap = price ≥ vwap`。**警示**:若误写 `amount/volume`(元/手 = 100×每股均价),`price≥vwap` 恒 false(如茅台 1400 vs 140000),且假 Quote 单测按错误公式造数据会全绿——单测必须用**真实比例的 amount/volume**(amount≈price×volume×100)造假 Quote,才能暴露反向错误。**降级**:`volume ≤ 0`(停牌/开盘前/无成交)→ `vwap=null`、`is_above_vwap=null`(不猜),客户端显"—"。VWAP 用**当日累计** amount 与 volume(两源报文即当日累计值),非分时。
+
+**盘中窗口判定(定死·重要#2 修正,单一函数,禁复用 loop 窗口)**:本 feature 专用 `_is_intraday_window(now: datetime) -> bool` = **交易日 且 `09:30 ≤ now.time() < 15:00`**(即 `is_trading_day(now.date())` 且落在开盘~收盘的整段内,**含午休 11:30–13:00**)。理由:午休时当日累计成交量/累计 amount/VWAP/现价都是**有效的上午终态**,盘中确认与 coach 上下文照常有意义,不该像 loop 那样把午休判为"非交易"。**明令不复用** `loop._is_trading_now`(它按 `trading_window` 的两段区间判、午休/15:00 后返 False)——若复用则午休 coach 不注入、盘中视图全 null,`elapsed_trading_minutes` 跨午休设计与 `closed` 分支全成死码。响应体里的 `is_trading` 字段 = `_is_intraday_window(now)` 的值。
+
+**非交易(窗口外)行为(定死)**:`_is_intraday_window(now)==false` 即窗口外(非交易日 / 09:30 前 / 15:00 后)。
+- 后端盘中端点(③)/coach 盘中上下文(②):窗口外仍**返回结构**,但 `is_trading=false` + 实时字段(现价/涨幅/VWAP/量能)全置 `null` 或标 `note:"non_trading"`(实时源盘后返上一交易日快照,不可当"今日盘中",一律不采信)。coach 深判照常出(用 EOD 事实),prompt 盘中块不渲染(资金约束句照旧钉死)。
+- 客户端候选盘中视图:`is_trading=false` 时刷新按钮**禁用** + 顶部标"非交易时段 · 盘中确认仅交易时段可用";已有 EOD 候选列表照常展示(不清空)。客户端**不自己判日历/时段**,一律以后端回传的 `isTrading` 为准(见 Phase D.4)。
+
+**拉价路径(定死)**:③ 盘中确认批量拉 = 复用 `realtime.get_realtime_quotes(codes)`(新浪批量天然支持多 code;主源缺则腾讯补,已实现)。② coach = on-demand 单票 `get_realtime_quote(code)`。**均走 HTTP 请求线程内同步拉一拍,不接入 monitor tick、不共享 monitor 的 `_build_two_source_quotes`**——monitor「每源每 tick ≤1 拉」纪律只约束后台轮询,on-demand 端点各自独立拉一次不违反(与现 `/coach` 的 `_resolve_prices` 同款)。
+
+**prompt 注入(定死,②)**:coach/chat 的 context 增一段 `intraday`(盘中语境),**仅 coach 模式、仅 `is_trading` 时注入实数**;候选 candidate 模式不注入(候选是次日进场判断,不需要盘中持仓语境)。
+- 注入字段:实时价 `price`、今日涨幅 `chg_pct`、现量估算 `intraday_vol_ratio`(带 note)、是否站 VWAP `is_above_vwap`。
+- 持仓语境(coach 已有,复用不重取):成本 `buy_price`、`pnl_pct`、`trade_day`(D 几)、距止损线%、距止盈线%。
+- **T-1 EOD 资金 prompt 约束(钉死措辞)**:资金段前置固定句——「以下资金数据截至 {fund_asof} 收盘(东财主力 EOD),**今日盘中资金未知,不得据此推测今日盘中资金动向或据此说"主力今日在/撤"**」。防 DeepSeek 拿 T-1 编盘中故事。
+- **盘中段护栏句**:「盘中量能为按已开盘时长折算的估算值,非精确,**早盘折算通常偏高**(A 股早盘量能前置,勿据此怂恿追高);VWAP 为当日累计均价(元/股)」。
+- 层1 机械纪律(3 硬线)不进 prompt 判定(照旧);盘中上下文只作 LLM 判断的**补充事实**,不改 verdict/advice 的二元派生逻辑。
+
+**鉴权(定死)**:③ 新端点复用 `require_token`(Bearer,同全部现有端点);无新鉴权路径。
+
+### Phase 拆分
+
+依赖:**A(后端盘中数据层)→ B(② coach 注入)+ C(③ 盘中端点)可并行**;D(前端)依赖 B/C 接口契约定稿;E(盘中真复测)最后。A 是 B/C 共同底座。
+
+---
+
+#### Phase A — 盘中数据层(后端·纯函数)
+
+新建 `backend/app/data/intraday.py`,四个**纯函数**(不自己拉价——拉价/拉 daily 在端点层做,函数只吃已拿到的 quote 对象 + prev5 均量数值,便于单测不联网 + 端点批量复用一拍拉价)。
+
+0. `_is_intraday_window(now: datetime) -> bool`(**本 feature 唯一时段判定**,B/C 端点都调它,禁复用 `loop._is_trading_now`——重要#2):`is_trading_day(now.date())` 且 `09:30 ≤ now.time() < 15:00`(**含午休**)。这是 `is_trading` 字段的唯一真值源。
+1. `elapsed_trading_minutes(now: datetime) -> int`:按上述口径算已开盘分钟(跨午休、边界)。纯 datetime 运算(时段有效性由调用方先经 `_is_intraday_window` 判)。
+2. `intraday_vol_ratio(current_vol, prev5_avg_vol, elapsed_min) -> tuple[Optional[float], str]`:返回 `(ratio_or_None, note)`,note∈{"ok","early","closed","no_base"}。`elapsed_min<60→(None,"early")`(建议#11 提保守阈);`prev5_avg_vol<=0→(None,"no_base")`;`elapsed_min>=240→(ratio,"closed")`;否则 `(ratio,"ok")`。ratio 保留 1 位小数。
+3. `vwap_of(quote) -> tuple[Optional[float], Optional[bool]]`:`vwap = amount/(volume×100)`(**元/股**,致命#1),`is_above_vwap = price ≥ vwap`;`volume<=0`(或 quote None)→`(None,None)`。单测须用 `amount≈price×volume×100` 的真实比例假 Quote(否则反向错误单测照样绿)。
+4. `build_intraday_snapshot(quote, prev5_avg_vol, *, now, is_trading) -> dict`:**纯编排**,吃 `quote`(Quote|None)+ `prev5_avg_vol`(float)→ 单票盘中快照 = `{is_trading, price, pre_close, chg_pct, open_chg_pct, vwap, is_above_vwap, intraday_vol_ratio, vol_note, asof(quote.ts if quote else "")}`。分支:① `is_trading=false` → 各实时字段 `None`、`vol_note="non_trading"`;② `is_trading=true` 但 `quote is None`(拉价失败)→ 实时字段 `None`、`vol_note="no_base"`(或复用 non_trading,施工钉一处);③ 正常 → 各字段实算,`vol_note` 由 `intraday_vol_ratio(...)` 返回。`chg_pct=(price-pre_close)/pre_close×100`、`open_chg_pct=(open-pre_close)/pre_close×100`,**均加 `pre_close>0` 除零守卫**(建议#6:`pre_close<=0` → 该 pct 置 `None`)。`intraday_vol_ratio` 走 A.2(先经 `elapsed_trading_minutes(now)` 算 elapsed)。**不在此函数内拉价/拉 daily**。
+
+**验收**:pytest 新增 ≥14 条覆盖:`_is_intraday_window` **午休(12:00)返 True**、09:20/15:01/非交易日返 False;折算跨午休(elapsed 定格 120)/头 60min→early/收盘边缘;VWAP 用**真实比例 amount(≈price×vol×100)** 断言 `is_above_vwap` 正确(致命#1,反向公式会被此测抓)+ volume=0 降级;快照 is_trading=false 全 null;quote=None 全 null;prev5=0→no_base;chg_pct/open_chg_pct 计算 + **pre_close=0 除零→null(建议#6)**。全部传假 Quote/数值,不联网。
+
+---
+
+#### Phase B — 持仓教练盘中上下文注入(后端·全栈接口)
+
+改 `app/llm/analyze.py`(`analyze_stock` coach 分支 + `chat_stock` coach 分支)与 `app/llm/prompt.py`(`build_user_prompt` + `build_chat_context_block` 的 coach 段)。
+
+1. `analyze_stock`/`chat_stock` 新增可选参 `intraday_quote: Optional[Quote] = None` 与 `is_trading: bool = False`(端点层传入,深判层不自己拉盘中价——保持可注入)。仅 `mode=="coach"` 且 `is_trading` 且 `intraday_quote is not None` 时,用 `form["prev5_avg_vol"]` + `intraday_quote` 调 `intraday.build_intraday_snapshot(...)` 得 snapshot dict,拼进 context 的 `intraday` 键;否则 context 无 `intraday`(prompt 盘中块不渲染)。**candidate 模式一律不组装**(候选是次日进场判断,无盘中持仓语境)。
+2. **端点层(`coach_position` / `chat` 的 coach 分支)只做两件事:判窗口 + 拉价**,snapshot 组装下沉到编排层(唯一路径,不给 builder 留分处组装的打架空间——修重要#2/#4):
+   - 判 `is_trading = intraday._is_intraday_window(datetime.now())`(**用 A 里的单一 `_is_intraday_window`,禁复用 `loop._is_trading_now`**——重要#2)。
+   - `is_trading` 时单票 `_quotes_fn([code])` 拉一拍拿**完整 Quote**(VWAP 需 amount/volume,`_resolve_prices` 只回 float 不够);**pnl_pct 复用同一 Quote 的 price**(不重复拉)。把 `intraday_quote=Quote|None` 与 `is_trading=bool` 作新参传给 `_analyze_fn`/`_chat_fn`(→ `analyze_stock`/`chat_stock`)。窗口外不拉价,传 `intraday_quote=None, is_trading=False`。
+   - **prev5 由编排层的 `_fetch_form` 顺带吐,端点绝不再拉 daily(修重要#4)**:改 `_fetch_form` 多返回 `prev5_avg_vol`(它已拉近 65 日 daily、`vols` 序列现成,取前 5 交易日 vol 均值;daily `vol` 单位=手,与 realtime 归一后同口径)。`analyze_stock`/`chat_stock` 在 coach 模式内、拿到 `form` 后,用 `form["prev5_avg_vol"]` + 端点传入的 `intraday_quote` 调 `intraday.build_intraday_snapshot(...)` 组装 snapshot 存进 context——**quote 与 form 同处(编排层)组装,唯一路径**。这样 `/chat` 每轮追问不叠额外 daily 拉取(coach 最坏链 ~45s < 客户端 60s,前提是不再叠这一拍)。
+3. `prompt.py`:coach 段增「盘中上下文」块(仅 context 含 `intraday` 键时渲染),含实时价/今日涨幅/`intraday_vol_ratio`(带 note 文案:early→"开盘初量能待观察"/no_base→"量能基准缺失")/站 VWAP;资金段前置钉死约束句(见技术选型);末尾盘中护栏句(含"早盘折算通常偏高",建议#11)。**两个量能数标签必须显著区分(建议#8),防 LLM 混谈**:现有形态块里 `form.vol_multiple` 标签明确改「**昨日 EOD 放量倍数**」,盘中块里 `intraday_vol_ratio` 标「**盘中折算量比(估算,非精确)**」——两者语义不同(一个是昨日收盘、一个是今日盘中折算)。**candidate 模式与窗口外:盘中块不渲染**(资金约束句照旧钉死)。
+4. `SYSTEM_PROMPT`/`CHAT_SYSTEM_PROMPT` 补一句:「若提供盘中上下文,它是按已开盘时长折算的估算实时数据,可参考但不精确;资金面仍是 EOD、不代表盘中资金」。
+5. **响应契约**:`/coach`、`/chat` 响应结构**不变**(不新增顶层字段;盘中信息只进 prompt 影响 LLM 文本)。客户端 `fund_asof` 文案已标注 EOD,复用即可(见 Phase D 文案微调)。
+
+**接口契约(不变,仅行为增强)**:`POST /positions/{id}/coach`、`POST /chat`(coach 模式)请求/响应形状全不变。降级:非交易时段/拉价失败 → 盘中块不注入,coach 照常出(退化为纯 EOD 判定,同 v1.3.x 现状)。
+
+**验收**:pytest 新增 ≥8 条:coach 盘中时 prompt 含盘中块 + 资金约束句(断言 `build_user_prompt`/`build_chat_context_block` 输出含钉死句、含 VWAP 字样);非交易时段 coach prompt **不含**盘中块但**含**资金约束句;candidate 模式不含盘中块;`analyze_stock(mode=coach, intraday=注入假快照)` 端到端注入(deepseek_fn 打桩断言收到的 context 含 intraday)。守味隔离回归:coach 注入盘中后仍不含 review_ref(现有测试不回归)。
+
+---
+
+#### Phase C — 候选池「今日续强确认」端点(后端)
+
+新端点 `GET /api/v1/candidates/intraday`(`require_token`)。**读时叠加、不落库**(candidates 表不动)。
+
+- **入参**:无(读当日最新候选缓存的 codes)。
+- **逻辑**:`td = store.latest_candidate_date()` → `codes = [c["code"] for c in store.list_candidates(td)][:rules.CANDIDATE_LIMIT]` → `is_trading = intraday._is_intraday_window(datetime.now())`(重要#2 单一判定) → `is_trading` 时 `realtime.get_realtime_quotes(codes)` **批量拉一拍**(一次请求 20 code)+ 逐票取 `prev5_avg_vol`(缓存,见下)→ 逐票 `intraday.build_intraday_snapshot(quote, prev5, now=..., is_trading=True)` 构造 items。窗口外/无候选 → 返回结构但 `isTrading=false` + items 实时字段 null(见非交易行为)。
+- **prev5 均量口径 + 缓存(建议#5)**:批量拉价一次请求即可(新浪多 code),prev5 均量需逐票 `tc.ts_daily`(单票近 10 自然日,取最近 5 条 `vol` 均值,与选股放量口径同源)。**prev5 按 `(code, trade_date)` 进程内缓存(仿 `fetch.load_industry_map` 模式)**——prev5 是 EOD 派生、当日内不变,首次算完缓存,同日重复调 `/candidates/intraday` 热路径只剩一拍批量拉价(~1s),不必每次 20 拍 daily(冷路径 ~5-10s)。某票 Tushare 未配/失败 → 该票 `intradayVolRatio=null` + `volNote="no_base"`(不崩,不缓存失败结果、留下次重试),其余票正常。客户端配 30s 长超时。
+- **`asof` 口径(建议#7)**:顶层 `asof` = **items 里第一个非空 `quote.ts` 的值**(多票 ts 可能不同、两源格式已由 realtime 归一;无任一 quote → `""`)。不取"当前系统时间",取真实快照时刻。
+- **响应形状(逐字段钉死,camelCase,前向兼容)**:
+  ```
+  {
+    "ok": true,
+    "isTrading": true,            // 非交易时段 false
+    "tradeDate": "2026-07-06",    // 候选缓存基准日(EOD 圈选日);空缓存 ""
+    "asof": "2026-07-06 10:23:00",// 实时快照时刻(取自 quote.ts;非交易时段 "")
+    "degraded": false,            // 无候选/无 token → true
+    "items": [
+      {
+        "code": "301051", "name": "信濠光电",
+        "price": 45.6,             // 现价;非交易/拉价失败 null
+        "chgPct": 3.21,            // 今日涨幅%(price vs pre_close);null 同上
+        "openChgPct": 1.05,        // 高开幅度%(open vs pre_close);null 同上
+        "isAboveVwap": true,       // 站 VWAP;volume<=0 或非交易 null
+        "intradayVolRatio": 1.4,   // 盘中折算量比;early/no_base/非交易 null
+        "volNote": "ok"            // ok|early|closed|no_base|non_trading
+      }
+    ]
+  }
+  ```
+  `items` 顺序 = 候选缓存 rank 序(续强判断按原推荐序看),但**客户端叠加到 EOD 候选行时一律按 `code` join(建议#10),不以顺序作对齐依据**(候选列表与 intraday items 理论同序,但拉价失败/条数差时顺序不可靠)。客户端解码用**前向兼容**(所有实时字段 `Optional`,缺键/null 都不崩)。
+
+**验收**:pytest 新增 ≥8 条:交易时段注入假 quotes → items 带实时字段 + volNote;窗口外 → isTrading=false + 实时字段 null;无候选缓存 → degraded=true items 空;单票拉价缺失 → 该票 price=null 其余票正常;openChgPct 计算(open vs pre_close)正确;VWAP 降级(volume=0);**`pre_close=0` → chgPct/openChgPct=null(建议#6 除零守卫)**;**`asof` 取第一个非空 quote.ts(建议#7)**。全部注入 `_quotes_fn`/`daily_fn` 假替身,不联网。端点走 `require_token`(补一条无 token 401)。
+
+---
+
+#### Phase D — 客户端(前端·双端,布局分叉照既有模式)
+
+1. **新增模型**(`Models.swift`):`IntradayItem`(逐字段对齐 C 响应,实时字段全 `Optional`)、`IntradayConfirmResult`(`isTrading/tradeDate/asof/degraded/items`)。
+2. **APIClient**(`Networking/APIClient.swift`):`fetchCandidatesIntraday() async throws -> IntradayConfirmResult`,走 `get("/api/v1/candidates/intraday", timeout: 30)`。**重要#3:现有 `private func get(_ path:)` 写死 `timeoutInterval=12`(APIClient.swift:550/558),须给 `get` 加 `timeout: TimeInterval = 12` 可选参**(同现有 `post`/`put` 已有 timeout 参的模式),本端点传 30(20 票 prev5 daily + 批量拉价 12s 会间歇超时)。**经 makeURL**(虽无 query 仍统一走,防 `?` 编码坑)。前向兼容解码(private DTO,实时字段 optional)。
+3. **AppModel**:`@Published var intraday: IntradayConfirmResult?` + `intradayLoading` + `func loadIntradayConfirm() async`(非交易时段 isTrading=false 时不清空 EOD 候选列表,只更新盘中态)。
+4. **CandidatesView**(双端):候选页增「盘中确认」入口/态。**按钮初始态钉死(建议#9)**:客户端**不自己判日历/时段**——「盘中确认」按钮**初始可点**,点击拉 `loadIntradayConfirm()`,响应回 `isTrading=false` 后再禁用 + 标注"非交易时段 · 盘中确认仅交易时段可用"(时段真值全由后端 `isTrading` 定,客户端不造日历)。iOS:header 增「盘中确认」按钮,拉到后候选行叠加盘中字段(现价/今日涨幅/高开/站 VWAP 徽章/折算量比 + volNote 文案);macOS:工具栏加「盘中确认」按钮 + 列表列叠加盘中字段(照既有 macOS 横列扩列模式,别把横列套 iOS)。**叠加按 `code` join(建议#10),不靠顺序**。**布局分叉照 CLAUDE.md 既有约定**(iOS 竖排弹性中列 / macOS 横向多列)。绿涨红跌:`chgPct`/`openChgPct` 着色**从数值派生**(`>=0` 绿),不字符串判负。
+5. **文案微调**:coach 卡/深析卡 `fund_asof` 标注**已有**"截至 {date} EOD · 东财主力口径(非盘中实时)";v1.4 盘中态下补一句区分——盘中确认视图内 VWAP/量能标"盘中折算估算,非精确"。改 .swift 后**必 `xcodegen generate`**(CLAUDE.md 坑)。
+
+**验收**:双端 `BUILD SUCCEEDED`(iOS Simulator + macOS build);XCTest 新增 ≥6 条:`IntradayConfirmResult` 解码(全字段/缺实时字段前向兼容/isTrading=false);盘中量比/VWAP 展示派生;chgPct 正负着色派生(负跌不染绿)。非交易时段视图态(按钮禁用逻辑)可离屏快照或状态断言。**computer-use Dock 守卫**下用 `ImageRenderer` 离屏快照核对(非 ScrollView 组件本体,CLAUDE.md 坑),不硬点。
+
+---
+
+#### Phase E — 两源盘中真复测(旧债,交易时段手动冒烟)
+
+**收 §3「待联调」旧债**:新浪/腾讯实时源从未在交易时段真盘中复测(此前只验收盘快照 + 样例报文单测)。②③均建在两源上,交易时段跑一次冒烟。
+
+- **冒烟脚本**:`backend/scripts/smoke_intraday.sh`(或 `.py`),交易时段手动跑,对一组固定测试 code(如 3 只不同板块在持仓/候选票)真拉两源,打印并断言:
+  1. **两源价量一致性**:同 code 新浪 vs 腾讯 `price`/`pre_close`/涨跌停一致(容差内);单位归一后 `volume`(手)/`amount`(元)量级一致(校验两源单位坑无回归)。
+  2. **VWAP 合理性**:`amount/(volume×100)`(元/股,致命#1 口径)落在当日 `[low, high]` 价区间内(若误用 `amount/volume` 会大 100 倍显著出界,正好反证单位口径)。
+  3. **盘中量能口径落地数字**:打印 `elapsed_min`、`current_vol`、`projected_full_vol`、`prev5_avg_vol`、`intraday_vol_ratio` 具体数值 + note,人工核对折算合理(如 10:30 时 elapsed≈60、折算≈现量×4 量级)。
+- **验收**:交易时段跑一次,三项均通过并把落地数字(两源一致性差异%、VWAP 样例、量能折算样例)记进变更日志/CLAUDE.md;若发现两源盘中口径新坑,记 CLAUDE.md 数据源坑并按需修 `intraday.py`。**此 Phase 依赖交易时段窗口**(A 股 09:30–15:00),排在最后,非交易时段先跑单测门禁、E 留交易时段补跑。
 
 ## 4b. 客户端契约(设计稿钉死,阶段 1+ 生效)
 
@@ -89,11 +221,12 @@
 
 ## 5. Backlog / 用户侧收尾
 
-### v1.4 待立项清单(已记,待用户下达立项指令)
+### v1.4 立项清单(②③已立项·2026-07-05,范围按用户拍板收窄;④维持推迟)
 
-- **② 持仓教练深判重做(实时化)**:现 coach 层2 资金面盘中是 T-1 假数据、对盘中"拿/清"决策失真。重做用实时价/量/涨幅/VWAP(新浪/腾讯可得),但**主力资金盘中仍缺**(与③同 Level-2 缺口)。层1 机械纪律(3硬线)不动。
-- **③ 盘中选股独立板块**:App 内盘后/盘中两板块分离。数据实测:`realtime_quote`/`rt_min` 可用、`rt_k` 无权限、**Tushare 资金全 EOD、无盘中主力资金**(需 Level-2 付费)。核心决策=盘中资金信号 砍/降级T-1/上Level-2。②③共享"实时价可得、实时资金不可得"同一数据现实,可能共用实时数据层。
-- **④ 选股展示分改绝对口径 + 因子绝对化 + 评分组成 UI**(2026-07-05 用户提出):
+- **② 持仓教练盘中上下文重做 → 已立项(v1.4 Phase B)**。范围收窄:给 coach/持仓对话注入实时盘中上下文(实时价/涨幅/现量折算/站 VWAP + 持仓语境),T-1 EOD 资金**保留但 prompt 钉死约束**防 DeepSeek 编盘中故事。**盘中主力资金层已砍**(用户自己肉眼看盘口),零新数据源。3 硬线/守味隔离/常量单一源不动。
+- **③ 盘中选股 → 收窄为「今日续强确认」视图,已立项(v1.4 Phase C/D)**。**不是全市场盘中选股**(那喂追高病根,明确不做):只读当日盘后圈的 20 只候选缓存 codes,盘中叠加实时价/涨幅/高开/站 VWAP/折算量能,回答"昨日圈的谁走出续强、现在是否进场时机"。盘中量能口径定死=已开盘时长折算日量(见 §4 技术选型)。**盘中主力资金已砍**,零新数据源、零 schema。
+- **明确不做(v1.4 防蔓延)**:盘中资金层(任何形式,含东财 push2)、全市场盘中选股、④选股展示分绝对口径、miniQMT/Level-2。
+- **④ 选股展示分改绝对口径 + 因子绝对化 + 评分组成 UI**(2026-07-05 用户提出,**维持推迟至选股策略稳定后**):
   - **现状问题**:展示分 `_normalize_scores` 是**池内 min-max→[10,100]**(排名赋分)——池内最高恒 100、不跨天可比、隐藏绝对质量(弱势日最好的票哪怕原始分 0.4 也显 100)。
   - **改法**:展示分 = **原始加权分×100**(艾迪精密 0.8586→86),绝对、跨天可比、弱势日诚实显低分。
   - **连带(必须一起做,否则半吊子)**:`rank_score` 里 `vol_ratio`/`fund` 两因子现仍用 `_normalize`(池内 min-max、相对)→ 改成**绝对评分曲线**(量比/资金率各自 [0,1] 曲线,像 `pos_health`/`turnover_health_score`/`mv_elastic_score` 那样);否则总分仍含两池相对项、不真跨天可比。
@@ -286,3 +419,5 @@
 - **[2026-07-04] v1.3.0 部署上线 ECS**:第三次真 migration(`_ensure_v130_columns`)幂等落地,**项目首次非空仓部署**(存量 3 持仓 + 0 trades,`cp` 备份 `linon.db.bak-20260704-203407` 校验后再动)。重启 health 2s 就绪(监控空档极短);端到端验通:② `GET /positions/correlation?code=600519`→`白酒`/conflict:false·200(存量 3 持仓 industry=NULL 护栏跳过、逐行无损)、⑤ 满仓 `GET /candidates` 仍返 20 只 degraded=false。内存 780M/1612M·swap 0。**④净额需真实清仓触发(列已就位)、⑥导出纯客户端;客户端 v1.3.0 UI 尚未 Release 换包(iOS 真机留用户 Xcode 分发)**。回滚锚 = DB 备份 + GitHub `da045c1`。运维详情 `~/Lino/hz_info.md`。
 - **[2026-07-05] v1.3.1(盘后选股完善)完工收口**:三块——① 新选股逻辑(删高位硬排除改只标注红/琥珀、粗筛/排序量比换 `daily_basic.volume_ratio`、排序换 9 因子集含 `pos_health`/`breakout_ok`,warnLevel 经 candidates 缓存表往返=第四次真 migration `warn_level` 列)、② 选股配置可调化(新表 `screen_config` + `GET/PUT /api/v1/screen/config` + 显式穿参生效不 monkeypatch + 深判层不吃配置)、③ 候选刷新改纯手动(删 15:35 自动 tick + 死码 `run_candidate_refresh`,回测回填移挂 `last_eod_date` 守卫)。走完整工作流:planner→plan-critic(1 致命+6 重要+6 建议全吸收)→builder 三批→reviewer(Fable·0 致命/3 🟡/8 🔵)→主会话审后修复(🟡#1 带内一致性 `_enforce_band_consistency`/🟡#2 调参屏按钮加载态守卫/用户新增 `mv_mega_ceil` 可调化)。**关键决策/偏离**:B3 调参屏入口用双端统一 sheet(非 plan 原写 NavigationLink/区块分叉,macOS Settings 场景约束所致,reviewer 判定合理偏离)。门禁:后端 pytest 378→450、客户端 XCTest 65→95、双端 `BUILD SUCCEEDED`;新增端点 2 个 `GET/PUT /api/v1/screen/config`;第四次真 migration `candidates.warn_level`;新表 `screen_config`。**收口清理**:删死常量 `VOL_MULTIPLE_MIN`(`rules.py`,零消费点)、CLAUDE.md 订正 3 处过期口径(候选自动刷新→纯手动/高位硬排除→只标注/排序 4 键→9 因子)。全文 `archive/v1.3.1_plan.md` + `archive/REVIEW_REPORT_v1.3.1.md`。(部署见下条)
 - **[2026-07-05] v1.3.1 部署上线 ECS + macOS 换包**:第四次真 migration(`candidates.warn_level`)+ `screen_config` 建表幂等落地,**479 候选历史行无损**(备份 `linon.db.bak-20260705-124531`)。prod 端到端验通:`GET /screen/config` 22 键默认(含 `mv_mega_ceil=1500`)+ PUT 存增量/`PUT {}` 恢复默认清行、`POST /candidates/refresh` **新 9 因子 count=168 degraded=false**、`GET /candidates` 20 只含 **2 amber**(warnLevel 经缓存表往返 = 致命#1 修复 prod 验证)、内存 895M/1612M。macOS Release `ditto` 换包 `/Applications`(含 v1.3.0+v1.3.1 全 UI);iOS 留用户 Xcode 分发。回滚锚 = DB 备份 + GitHub `df8985e`。运维详情 `~/Lino/hz_info.md`。
+- **[2026-07-05] v1.4(盘中上下文:教练 + 候选续强确认)立项**:§4 落定 5 Phase。**核心前提(用户拍板)**:盘中主力资金层整个砍掉(用户肉眼看盘口),**零新增外部数据源、零 schema migration、零新表**,只复用现有新浪/腾讯实时源 + Tushare EOD。**两件事**:② coach/持仓对话注入实时盘中上下文(实时价/涨幅/现量折算/站 VWAP + 持仓语境),T-1 EOD 资金保留但 prompt 钉死约束防 DeepSeek 编盘中故事(Phase B);③ 候选池「今日续强确认」视图——**收窄=只对当日盘后圈的 20 只候选叠加实时态,非全市场盘中选股**(那喂追高病根,明确不做),新端点 `GET /candidates/intraday` 读时叠加不落库(Phase C)+ 双端盘中确认视图(Phase D)。**关键选型(定死不留施工;口径以下一条 plan-critic 修订条为最终准)**:盘中量能口径 = **已开盘时长折算日量**(`current_vol/elapsed_min×240`,跨午休 240min,头 **60min**→early、收盘→closed、缺基准→no_base;明确不选"vs 昨日同时段");VWAP=`amount/(volume×100)`(元/股,`volume<=0`→null 降级);盘中时段以本 feature 专用 `_is_intraday_window`(交易日 09:30–15:00 含午休)判定、窗口外实时字段全 null + 刷新禁用;拉价 on-demand 独立拉一拍(不接 monitor tick、不破"每源每 tick ≤1 拉"纪律);盘中上下文只作 LLM 补充事实不改 verdict/advice 二元派生;新端点复用 `require_token`。**旧债一并收(Phase E)**:两源盘中真复测(§3 待联调挂久),交易时段冒烟验两源价量一致性/VWAP 合理性/量能折算落地数字。**不动契约**:3 硬线/-5.0·-4.9 口径/D4 count==4/守味隔离(只注 history_digest)/绿涨红跌/规则常量单一源/选股因子。门禁基线 pytest 450 / XCTest 95 起步(预计 A+B+C 新增后端 ≥30、D 新增客户端 ≥6)。
+- **[2026-07-05] v1.4 plan-critic 修订(1 致命+3 重要+6 建议,全吸收)**:**致命#1** VWAP 单位写反差 100 倍(`amount/volume`=元/手=100×每股均价、`price≥vwap` 恒 false 且假 Quote 单测照绿)→ 全文改 `vwap=amount/(volume×100)`(元/股),与 `form.py:173` 口径互指(form 是千元/手 ×1000,realtime 归一后元/手只 ×100,勿照抄系数),Phase A.3/E.2/§4 三处同步 + 单测要求用真实比例 amount 造假 Quote。**重要#2** is_trading 判定与折算口径打架(量能设计跨午休/closed,但复用 `loop._is_trading_now` 会把午休判 False 致跨午休设计与 closed 成死码)→ 本 feature 单立 `intraday._is_intraday_window(now)`=交易日且 09:30≤now<15:00(**含午休**,午休累计量/VWAP 有效),B/C 端点均调它、**明令禁复用 loop 窗口**;closed 仅 now==15:00 边缘兜底。**重要#3** 客户端 `get()` 写死 12s 无 timeout 参 → Phase D.2 明写给 `get` 加 `timeout=12` 可选参、盘中确认传 30。**重要#4** coach 路径对同 code 拉两遍 daily(端点 prev5 + `_fetch_form` 各一)→ 改 `_fetch_form` 顺带吐 `prev5_avg_vol`、snapshot 组装下沉编排层(quote 由端点传入、prev5 复用 form,唯一路径),`/chat` 每轮追问不叠额外拉取。**6 建议全收**:#5 prev5 按 `(code,trade_date)` 进程内缓存(仿 `load_industry_map`);#6 chg/openChg 加 `pre_close>0` 除零守卫→null;#7 `asof` 取第一个非空 quote.ts;#8 prompt 两量能数标签区分(「昨日 EOD 放量倍数」vs「盘中折算量比(估算)」)防混谈;#9 客户端「盘中确认」按钮初始可点、以后端 `isTrading` 定禁用(不造日历);#10 客户端叠加按 `code` join 不靠顺序;#11 early 阈 30→**60min**(A 股早盘量能前置、10:30 前折算系统性高估偏多头,提保守阈)+ prompt 护栏句/UI 文案点明"早盘折算通常偏高"。**建议#11 取舍**:采纳"提 early 阈到 60min"这一支(而非仅文案点明),因偏差方向恰好利多怂恿追高、正撞用户追高病根,值得用更保守阈直接屏蔽早盘不可靠折算,并叠加文案双保险。门禁预计后端 ≥30(A≥14/B≥8/C≥8)、客户端 ≥6。待施工。
