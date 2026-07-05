@@ -235,6 +235,32 @@ enum ScreenConfigSpec {
     static let allFields: [ScreenConfigField] = weightFields + thresholdFields
 }
 
+// MARK: - v1.4 Phase D:候选池「今日续强确认」(GET /api/v1/candidates/intraday)
+
+/// 单票盘中续强字段(逐字段对齐后端 §4 Phase C 响应契约;实时字段全 Optional——
+/// 非交易时段/拉价失败/降级均置 null,客户端一律显"—",不因缺字段崩解码)。
+struct IntradayItem: Identifiable, Codable {
+    var id: String { code }
+    var code: String
+    var name: String
+    var price: Double?
+    var chgPct: Double?
+    var openChgPct: Double?
+    var isAboveVwap: Bool?
+    var intradayVolRatio: Double?
+    var volNote: String?   // ok|early|closed|no_base|non_trading
+}
+
+/// GET /api/v1/candidates/intraday 顶层响应(plan §4 Phase C)。
+struct IntradayConfirmResult: Codable {
+    var ok: Bool
+    var isTrading: Bool
+    var tradeDate: String
+    var asof: String
+    var degraded: Bool
+    var items: [IntradayItem]
+}
+
 // MARK: - 交易日历原语(对齐 PROJECT_PLAN Phase 0.5;持仓天数靠它按需算)
 //
 //   count_holding_trade_days(buyDate, today): 闭区间[buyDate,today]内交易日个数,买入日 = 1

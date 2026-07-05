@@ -91,6 +91,12 @@ final class AppModel {
     var candidatesLoading = false
     var candidatesRefreshing = false   // 手动强制重算中(全市场拉取,可能数十秒)
 
+    // —— v1.4 Phase D:候选池「今日续强确认」(GET /candidates/intraday)——
+    /// 盘中续强结果;nil = 尚未拉取过。非交易时段(isTrading=false)不清空 EOD 候选列表,
+    /// 只更新盘中态(按钮禁用 + 标注),叠加展示按 code join(见 CandidatesView)。
+    var intraday: IntradayConfirmResult? = nil
+    var intradayLoading = false
+
     // —— 阶段2:深析/对话 thread(AnalysisView)——
     var inAnalysis: Bool = false           // 是否在深析全屏(iOS push / macOS 覆盖内容区)
     var chatMode: ChatMode = .analyze
@@ -348,6 +354,33 @@ final class AppModel {
         } catch {
             showToast("刷新失败,请稍后重试", isError: true)
         }
+    }
+
+    /// v1.4 Phase D:拉候选池「今日续强确认」(GET /candidates/intraday)。
+    /// 客户端不自判日历/时段——按钮初始可点,响应回 isTrading=false 才禁用(时段真值全由后端定)。
+    /// 非交易时段(isTrading=false)也正常写入 intraday(供按钮态/提示文案),不清空 EOD 候选列表。
+    func loadIntradayConfirm() async {
+        guard let client = clientProvider() else {
+            showToast("未配置后端连接", isError: true); return
+        }
+        intradayLoading = true
+        defer { intradayLoading = false }
+        do {
+            let r = try await client.fetchCandidatesIntraday()
+            self.intraday = r
+            if !r.isTrading {
+                showToast("非交易时段 · 盘中确认仅交易时段可用")
+            }
+        } catch let e as APIError {
+            showToast(e.errorDescription ?? "盘中确认拉取失败", isError: true)
+        } catch {
+            showToast("盘中确认拉取失败", isError: true)
+        }
+    }
+
+    /// 按 code join 盘中续强字段(建议#10:不靠数组顺序对齐)。无 intraday 结果 → nil。
+    func intradayItem(byCode code: String) -> IntradayItem? {
+        intraday?.items.first(where: { $0.code == code })
     }
 
     // MARK: - 阶段2:深析 / 对话(AnalysisView)

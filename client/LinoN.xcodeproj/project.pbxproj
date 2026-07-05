@@ -11,6 +11,7 @@
 		1724987046E278BDEBF17F22 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 043186D7ECC9EB58CD89BFE9 /* AppModel.swift */; };
 		1754FF3C20C2F35DDB76614D /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BA1ABA14457009707D25102 /* MemoryView.swift */; };
 		2BAF80FB4990852C4DEBAF30 /* HoldingCardModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 963822D25C21FAE170471799 /* HoldingCardModel.swift */; };
+		3251C776D4D3F7352614F6CE /* IntradayConfirmTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 310478347D6B253A9B5BEF99 /* IntradayConfirmTests.swift */; };
 		34DF23A9102F30CB91BA5551 /* CandidatesAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B023CF099F6D9991C86BDB5 /* CandidatesAnalysisTests.swift */; };
 		3EFDFC95CD5CBF6206F924BA /* SnapshotRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87854D8BA6C91A2E4C326EF6 /* SnapshotRenderTests.swift */; };
 		46DF63BE2A610856E1B17DD0 /* EntrySheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = B623BBB02515ECC2746699ED /* EntrySheets.swift */; };
@@ -57,6 +58,7 @@
 		158F345C767ED97569FADBED /* PushManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushManager.swift; sourceTree = "<group>"; };
 		179472D2E17A2E57C8A84D6A /* HoldingDayPips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoldingDayPips.swift; sourceTree = "<group>"; };
 		1AE9F6CBA8B057D868C04117 /* ReviewMemoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewMemoryTests.swift; sourceTree = "<group>"; };
+		310478347D6B253A9B5BEF99 /* IntradayConfirmTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntradayConfirmTests.swift; sourceTree = "<group>"; };
 		31C1C0D7C180D4ACE93AB772 /* LinoNTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = LinoNTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		37E5F33C3E94095C90D09E06 /* CandidatesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidatesView.swift; sourceTree = "<group>"; };
 		3B023CF099F6D9991C86BDB5 /* CandidatesAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidatesAnalysisTests.swift; sourceTree = "<group>"; };
@@ -164,6 +166,7 @@
 			children = (
 				E3D5C872E69CCE30B16984D2 /* AppModelTests.swift */,
 				3B023CF099F6D9991C86BDB5 /* CandidatesAnalysisTests.swift */,
+				310478347D6B253A9B5BEF99 /* IntradayConfirmTests.swift */,
 				1AE9F6CBA8B057D868C04117 /* ReviewMemoryTests.swift */,
 				AB03A180D04C8E2725D13B24 /* ScreenConfigTests.swift */,
 				8736D47CD5308B0DA24A631E /* SignatureFormulaTests.swift */,
@@ -333,6 +336,7 @@
 			files = (
 				54106172460A25564424A74A /* AppModelTests.swift in Sources */,
 				34DF23A9102F30CB91BA5551 /* CandidatesAnalysisTests.swift in Sources */,
+				3251C776D4D3F7352614F6CE /* IntradayConfirmTests.swift in Sources */,
 				B6AC951037434ECDFA97F4A8 /* ReviewMemoryTests.swift in Sources */,
 				EB2A7201315782EAE22141EB /* ScreenConfigTests.swift in Sources */,
 				7859D1E2930B9AD490D3A3EE /* SignatureFormulaTests.swift in Sources */,

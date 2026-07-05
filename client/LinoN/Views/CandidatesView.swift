@@ -24,6 +24,7 @@ struct CandidatesViewIOS: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 header
+                intradayNonTradingBanner
                 explainBar
                 if model.shownCandidates.isEmpty {
                     noCandidateCard
@@ -41,6 +42,15 @@ struct CandidatesViewIOS: View {
         .task { if model.candidates.isEmpty { await model.loadCandidates() } }
     }
 
+    /// v1.4 Phase D4:非交易时段标注(建议#9)。仅在拉取过盘中确认且 isTrading=false 时显示。
+    @ViewBuilder private var intradayNonTradingBanner: some View {
+        if let intraday = model.intraday, !intraday.isTrading {
+            Text("非交易时段 · 盘中确认仅交易时段可用")
+                .font(.system(size: 12)).foregroundStyle(LN.textTertiary)
+                .padding(.horizontal, 4)
+        }
+    }
+
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
@@ -52,9 +62,35 @@ struct CandidatesViewIOS: View {
             }
             Spacer()
             exportButton
+            intradayButton
             refreshButton
         }
         .padding(.horizontal, 4)
+    }
+
+    /// v1.4 Phase D4:「盘中确认」按钮——初始可点(建议#9:客户端不自判日历/时段),
+    /// 拉回 isTrading=false 才禁用 + 标注非交易时段(时段真值全由后端 isTrading 定)。
+    private var intradayButton: some View {
+        Button(action: { Task { await model.loadIntradayConfirm() } }) {
+            Group {
+                if model.intradayLoading {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "bolt.horizontal.circle")
+                }
+            }
+            .font(.system(size: 16, weight: .semibold))
+            .frame(width: 40, height: 40)
+            .background(Circle().fill(intradayButtonDisabled ? LN.chipNeutral : LN.cardBg))
+            .overlay(Circle().stroke(LN.hairline, lineWidth: 0.5))
+            .foregroundStyle(intradayButtonDisabled ? LN.textTertiary : LN.accent)
+        }
+        .buttonStyle(.plain)
+        .disabled(intradayButtonDisabled)
+    }
+
+    private var intradayButtonDisabled: Bool {
+        model.intradayLoading || (model.intraday != nil && model.intraday?.isTrading == false)
     }
 
     /// v1.3.0 Phase E:导出同花顺 TXT(ShareLink 分享 sheet)。空候选/降级时禁用。
@@ -141,6 +177,7 @@ struct CandidatesViewMac: View {
             toolbar
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    intradayNonTradingBanner
                     CandidatesExplainBar(headline: CandidatesCopy.headline(model))
                     if model.shownCandidates.isEmpty {
                         noCandidateCard
@@ -168,6 +205,7 @@ struct CandidatesViewMac: View {
                 .font(.system(size: 12.5)).foregroundStyle(LN.textTertiary)
             Spacer()
             exportButton
+            intradayToolbarButton
             Button(action: { Task { await model.recomputeCandidates() } }) {
                 HStack(spacing: 5) {
                     if model.candidatesRefreshing { ProgressView().controlSize(.small) }
@@ -186,6 +224,35 @@ struct CandidatesViewMac: View {
         .frame(height: 52)
         .background(.ultraThinMaterial)
         .overlay(Divider().overlay(LN.hairline), alignment: .bottom)
+    }
+
+    /// v1.4 Phase D4:「盘中确认」工具栏按钮(同 iOS 语义:初始可点,isTrading=false 才禁用)。
+    private var intradayToolbarButton: some View {
+        Button(action: { Task { await model.loadIntradayConfirm() } }) {
+            HStack(spacing: 5) {
+                if model.intradayLoading { ProgressView().controlSize(.small) }
+                else { Image(systemName: "bolt.horizontal.circle") }
+                Text(model.intradayLoading ? "确认中…" : "盘中确认")
+            }
+            .font(.system(size: 12, weight: .medium))
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 8).fill(intradayButtonDisabled ? LN.chipNeutral : LN.accent.opacity(0.10)))
+            .foregroundStyle(intradayButtonDisabled ? LN.textTertiary : LN.accent)
+        }
+        .buttonStyle(.plain)
+        .disabled(intradayButtonDisabled)
+    }
+
+    private var intradayButtonDisabled: Bool {
+        model.intradayLoading || (model.intraday != nil && model.intraday?.isTrading == false)
+    }
+
+    /// v1.4 Phase D4:非交易时段标注(建议#9)。仅在拉取过盘中确认且 isTrading=false 时显示。
+    @ViewBuilder private var intradayNonTradingBanner: some View {
+        if let intraday = model.intraday, !intraday.isTrading {
+            Text("非交易时段 · 盘中确认仅交易时段可用")
+                .font(.system(size: 12)).foregroundStyle(LN.textTertiary)
+        }
     }
 
     /// v1.3.0 Phase E:导出同花顺 TXT(macOS 用 NSSavePanel 存 .txt)。空候选/降级时禁用。
@@ -336,6 +403,8 @@ struct CandidateRow: View {
     private var c: Candidate { candidate }
     private var volIsHigh: Bool { c.volPct >= 80 }
     private var rankIsFirst: Bool { c.rank == 1 }
+    /// v1.4 Phase D4:盘中续强字段按 code join(建议#10,不靠数组顺序)。nil = 未拉取/该票缺失。
+    private var intraday: IntradayItem? { model.intradayItem(byCode: c.code) }
 
     var body: some View {
         if compact { iosRow } else { macRow }
@@ -344,41 +413,44 @@ struct CandidateRow: View {
     // MARK: - iOS:rank + 弹性中列(名/警告·板块/[放量条·放量·主力])+ 右侧价/涨/chevron
 
     private var iosRow: some View {
-        HStack(spacing: 13) {
-            VStack(spacing: 5) {
-                rankChip
-                scoreBadge            // 阶段3.1:分数徽章置于 rank chip 下方(窄屏不抢中列宽)
-            }
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) {
-                    Text(c.name).font(.system(size: 14.5, weight: .semibold))
-                        .foregroundStyle(LN.textPrimary).lineLimit(1).fixedSize()
-                    Text(c.code).font(.system(size: 11).monospacedDigit()).foregroundStyle(LN.textTertiary)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 13) {
+                VStack(spacing: 5) {
+                    rankChip
+                    scoreBadge            // 阶段3.1:分数徽章置于 rank chip 下方(窄屏不抢中列宽)
                 }
-                warnOrSector
-                HStack(spacing: 7) {
-                    volBar(width: 54)
-                    Text("放量 \(c.volMultiple)")
-                        .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(volIsHigh ? LN.up : LN.textSecondary)
-                    Text("主力 \(c.flow)")
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(c.flow.contains("-") ? LN.down : LN.textTertiary)
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 6) {
+                        Text(c.name).font(.system(size: 14.5, weight: .semibold))
+                            .foregroundStyle(LN.textPrimary).lineLimit(1).fixedSize()
+                        Text(c.code).font(.system(size: 11).monospacedDigit()).foregroundStyle(LN.textTertiary)
+                    }
+                    warnOrSector
+                    HStack(spacing: 7) {
+                        volBar(width: 54)
+                        Text("放量 \(c.volMultiple)")
+                            .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(volIsHigh ? LN.up : LN.textSecondary)
+                        Text("主力 \(c.flow)")
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(c.flow.contains("-") ? LN.down : LN.textTertiary)
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .trailing, spacing: 6) {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(LNFmt.price(c.price))
-                        .font(.system(size: 15, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(LN.textPrimary)
-                    Text(c.chg)
-                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(c.chg.contains("-") ? LN.down : LN.up)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .trailing, spacing: 6) {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(LNFmt.price(c.price))
+                            .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(LN.textPrimary)
+                        Text(c.chg)
+                            .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(c.chg.contains("-") ? LN.down : LN.up)
+                    }
+                    compactAnalyzeButton
                 }
-                compactAnalyzeButton
+                .fixedSize()
             }
-            .fixedSize()
+            intradayOverlayIOS
         }
         .padding(.horizontal, 15).padding(.vertical, 14)
         .background(rowBackground)
@@ -387,45 +459,124 @@ struct CandidateRow: View {
     // MARK: - macOS:横向列(# / 股票 / 现价涨幅 / 放量条·倍数 / 主力 / 换手 / 深析)
 
     private var macRow: some View {
-        HStack(spacing: 12) {
-            rankChip.frame(width: 28)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(c.name).font(.system(size: 14.5, weight: .semibold))
-                        .foregroundStyle(LN.textPrimary).lineLimit(1)
-                    Text(c.code).font(.system(size: 11).monospacedDigit()).foregroundStyle(LN.textTertiary)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                rankChip.frame(width: 28)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(c.name).font(.system(size: 14.5, weight: .semibold))
+                            .foregroundStyle(LN.textPrimary).lineLimit(1)
+                        Text(c.code).font(.system(size: 11).monospacedDigit()).foregroundStyle(LN.textTertiary)
+                    }
+                    warnOrSector
                 }
-                warnOrSector
-            }
-            .frame(minWidth: 130, alignment: .leading)
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(LNFmt.price(c.price))
-                    .font(.system(size: 14, weight: .semibold).monospacedDigit()).foregroundStyle(LN.textPrimary)
-                Text(c.chg)
-                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(c.chg.contains("-") ? LN.down : LN.up)
-            }
-            .frame(width: 92, alignment: .trailing)
-            HStack(spacing: 8) {
-                volBar(width: nil)
-                Text(c.volMultiple)
-                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(volIsHigh ? LN.up : LN.textPrimary).fixedSize()
-            }
-            .frame(width: 132)
-            Text(c.flow)
-                .font(.system(size: 13, weight: .semibold).monospacedDigit())
-                .foregroundStyle(c.flow.contains("-") ? LN.down : LN.up)
+                .frame(minWidth: 130, alignment: .leading)
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(LNFmt.price(c.price))
+                        .font(.system(size: 14, weight: .semibold).monospacedDigit()).foregroundStyle(LN.textPrimary)
+                    Text(c.chg)
+                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(c.chg.contains("-") ? LN.down : LN.up)
+                }
                 .frame(width: 92, alignment: .trailing)
-            Text(c.turnover)
-                .font(.system(size: 13).monospacedDigit()).foregroundStyle(LN.textSecondary)
-                .frame(width: 56, alignment: .trailing)
-            scoreBadge.frame(width: 54, alignment: .trailing)   // 阶段3.1:分数窄列(nil 时空)
-            analyzeButton.frame(width: 70, alignment: .trailing)
+                HStack(spacing: 8) {
+                    volBar(width: nil)
+                    Text(c.volMultiple)
+                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(volIsHigh ? LN.up : LN.textPrimary).fixedSize()
+                }
+                .frame(width: 132)
+                Text(c.flow)
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(c.flow.contains("-") ? LN.down : LN.up)
+                    .frame(width: 92, alignment: .trailing)
+                Text(c.turnover)
+                    .font(.system(size: 13).monospacedDigit()).foregroundStyle(LN.textSecondary)
+                    .frame(width: 56, alignment: .trailing)
+                scoreBadge.frame(width: 54, alignment: .trailing)   // 阶段3.1:分数窄列(nil 时空)
+                analyzeButton.frame(width: 70, alignment: .trailing)
+            }
+            intradayOverlayMac
         }
         .padding(.horizontal, 16).padding(.vertical, 15)
         .background(rowBackground)
+    }
+
+    // MARK: - v1.4 Phase D4:盘中续强叠加行(按 code join;无 intraday 结果时不显示,布局不塌)
+
+    /// iOS:紧凑一行——现价/今日涨幅/高开幅度/站 VWAP 徽章/折算量比 + volNote 文案。
+    @ViewBuilder private var intradayOverlayIOS: some View {
+        if let it = intraday {
+            HStack(spacing: 8) {
+                if let price = it.price {
+                    Text("盘中 \(LNFmt.price(price))")
+                        .font(.system(size: 11).monospacedDigit()).foregroundStyle(LN.textSecondary)
+                }
+                if let chg = it.chgPct {
+                    Text(LNFmt.pct1(chg))
+                        .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(chg >= 0 ? LN.up : LN.down)
+                }
+                if let above = it.isAboveVwap {
+                    vwapBadge(above)
+                }
+                Text(intradayVolNoteText(it))
+                    .font(.system(size: 10.5)).foregroundStyle(LN.textTertiary)
+                    .lineLimit(1)
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    /// macOS:同语义横排,略宽字号。
+    @ViewBuilder private var intradayOverlayMac: some View {
+        if let it = intraday {
+            HStack(spacing: 10) {
+                Text("盘中续强").font(.system(size: 11, weight: .semibold)).foregroundStyle(LN.textTertiary)
+                if let price = it.price {
+                    Text(LNFmt.price(price))
+                        .font(.system(size: 12).monospacedDigit()).foregroundStyle(LN.textSecondary)
+                }
+                if let chg = it.chgPct {
+                    Text(LNFmt.pct1(chg))
+                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(chg >= 0 ? LN.up : LN.down)
+                }
+                if let openChg = it.openChgPct {
+                    Text("高开 \(LNFmt.pct1(openChg))")
+                        .font(.system(size: 11).monospacedDigit()).foregroundStyle(LN.textTertiary)
+                }
+                if let above = it.isAboveVwap {
+                    vwapBadge(above)
+                }
+                Text(intradayVolNoteText(it))
+                    .font(.system(size: 11)).foregroundStyle(LN.textTertiary)
+                Spacer()
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    private func vwapBadge(_ above: Bool) -> some View {
+        Text(above ? "站VWAP" : "破VWAP")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(above ? LN.up : LN.down)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Capsule().fill((above ? LN.up : LN.down).opacity(0.10)))
+    }
+
+    /// volNote 文案(照 plan §4 技术选型 note 语义;early 特别标"估算通常偏高"提示)。
+    private func intradayVolNoteText(_ it: IntradayItem) -> String {
+        guard let ratio = it.intradayVolRatio else {
+            switch it.volNote {
+            case "early": return "开盘初,量能待观察"
+            case "no_base": return "量能基准缺失"
+            case "non_trading": return "非交易时段"
+            default: return "量能—"
+            }
+        }
+        return "量比\(String(format: "%.1f", ratio))x(估算,早盘通常偏高)"
     }
 
     // MARK: - 共享小部件

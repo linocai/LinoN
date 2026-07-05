@@ -145,6 +145,29 @@ private struct CandidatesRefreshResponse: Decodable {
     let degraded: Bool
 }
 
+// MARK: - v1.4 Phase D:候选池「今日续强确认」(GET /candidates/intraday,plan §4 Phase C)
+
+/// 响应形状 camelCase,逐字段对齐后端;实时字段全 Optional(前向兼容,缺键/null 不崩)。
+private struct IntradayItemDTO: Decodable {
+    let code: String
+    let name: String
+    let price: Double?
+    let chgPct: Double?
+    let openChgPct: Double?
+    let isAboveVwap: Bool?
+    let intradayVolRatio: Double?
+    let volNote: String?
+}
+
+private struct IntradayConfirmResponse: Decodable {
+    let ok: Bool
+    let isTrading: Bool
+    let tradeDate: String
+    let asof: String
+    let degraded: Bool
+    let items: [IntradayItemDTO]
+}
+
 /// POST /candidates/{code}/analyze 响应(plan §4.3)。
 struct AnalyzeResult {
     let code: String
@@ -433,6 +456,20 @@ actor APIClient {
         return (resp.count, resp.degraded)
     }
 
+    // —— v1.4 Phase D:候选池「今日续强确认」(GET /candidates/intraday;20 票 prev5 daily
+    //     冷路径 + 批量拉价,长超时 30s;经 makeURL,虽无 query 仍统一走免 "?" 编码坑)——
+    func fetchCandidatesIntraday() async throws -> IntradayConfirmResult {
+        let data = try await get("/api/v1/candidates/intraday", timeout: 30)
+        let resp = try JSONDecoder().decode(IntradayConfirmResponse.self, from: data)
+        let items = resp.items.map {
+            IntradayItem(code: $0.code, name: $0.name, price: $0.price, chgPct: $0.chgPct,
+                        openChgPct: $0.openChgPct, isAboveVwap: $0.isAboveVwap,
+                        intradayVolRatio: $0.intradayVolRatio, volNote: $0.volNote)
+        }
+        return IntradayConfirmResult(ok: resp.ok, isTrading: resp.isTrading, tradeDate: resp.tradeDate,
+                                     asof: resp.asof, degraded: resp.degraded, items: items)
+    }
+
     // —— 阶段2:on-demand 深判候选(POST /candidates/{code}/analyze;上游失败仍 200 返占位卡)——
     func analyzeCandidate(code: String) async throws -> AnalyzeResult {
         // 后端同步调 DeepSeek(超时 30s)+ 舆情/行情拉取,常 >12s → 需长超时(同 refresh 90s 坑)。
@@ -547,7 +584,9 @@ actor APIClient {
         URL(string: path, relativeTo: base)?.absoluteURL
     }
 
-    private func get(_ path: String) async throws -> Data {
+    /// v1.4 Phase D(重要#3):加 `timeout` 可选参(默认 12,同 post/put 已有模式)。
+    /// 盘中确认端点(20 票 prev5 daily 冷路径 + 批量拉价)传 30,免间歇性超时误报网络错误。
+    private func get(_ path: String, timeout: TimeInterval = 12) async throws -> Data {
         try ensureToken()
         guard let url = Self.makeURL(base: baseURL, path: path) else {
             throw APIError.transport("无效 URL: \(path)")
@@ -555,7 +594,7 @@ actor APIClient {
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.timeoutInterval = 12
+        req.timeoutInterval = timeout
         return try await send(req)
     }
 
