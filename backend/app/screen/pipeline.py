@@ -128,8 +128,8 @@ def build_candidates(
         day_pcts=[s.pct_chg for s in survivors],                 # 信号6(今日涨幅)
         cfg=cfg,
     )
-    # 展示分 score:对【全部 survivors】原始加权分 min-max 归一到 [SCORE_FLOOR,100](截断前,
-    # 与 rank 同源同序、只展示不改排序;全相等/单票 → 中性满分 100;见 plan §4.0 打分展示口径)。
+    # 展示分 score:对【全部 survivors】原始加权分绝对化 clamp(×100,[0,100])(v1.4.1
+    # Phase C1,与 rank 同源同序、只展示不改排序;跨天可比,见 plan §4.2 打分展示口径)。
     display_scores = _normalize_scores(scores)
 
     ranked = sorted(
@@ -193,20 +193,14 @@ def _warn_level(sr: StockRow, cfg: Optional[Dict[str, Any]] = None) -> Optional[
 
 
 def _normalize_scores(raw_scores: List[float]) -> List[int]:
-    """把原始加权分 min-max 归一到 [SCORE_FLOOR, 100] 取整(展示分,plan §4.0)。
+    """展示分绝对口径(v1.4.1 Phase C1,plan §4.2):`clamp(原始加权分 × 100, 0, 100)`。
 
-    · 对传入的【全部原始分】(截断前)归一——与 rank 同源同序,单调递增变换,不改次序。
-    · 全相等/单票(max-min≈0)→ 统一给中性满分 100(避免除零 + "唯一/并列最优")。
-    · floor 抬到 SCORE_FLOOR(=10)而非 0:避免末位恒 0 分、两票必然 100/0 的观感矛盾。
+    逐票独立,不再依赖池内 min/max——跨天可比、弱势日诚实显低分(甚至 0)。
+    正权部分(8 因子权重归一和=1.0)恒落 [0,1],day_surge 罚项使总分可下探到负值;
+    负分一律夹 0(展示语义:0 分=最差,不显负数),上界 100 clamp 兜死。
+    旧 SCORE_FLOOR 语义(避免末位恒 0)在绝对口径下取消——弱势票诚实显低分是刻意的。
     """
-    if not raw_scores:
-        return []
-    lo, hi = min(raw_scores), max(raw_scores)
-    floor = rules.SCORE_FLOOR
-    if hi - lo < 1e-12:
-        return [100] * len(raw_scores)   # 全相等/单票 → 中性满分
-    span = hi - lo
-    return [int(round(floor + (s - lo) / span * (100 - floor))) for s in raw_scores]
+    return [int(round(max(0.0, min(100.0, s * 100)))) for s in raw_scores]
 
 
 def run_pipeline(

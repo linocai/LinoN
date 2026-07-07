@@ -374,9 +374,10 @@ struct CandidatesExplainBar: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// 阶段3.1:相对分护栏文案。走可换行 Text(非定宽 pill),避开阶段2 已修的窄屏 pill 换行坑。
+    /// v1.4.1 Phase C3:绝对分护栏文案(原相对分口径已改绝对口径,plan §4 Phase C3)。
+    /// 走可换行 Text(非定宽 pill),避开阶段2 已修的窄屏 pill 换行坑。
     private var scoreNote: some View {
-        Text("分数为当日候选池内相对评分,不同日期不可横向比较。")
+        Text("分数为绝对质量分(原始加权分×100),跨日可比;常态 30–70 分属正常,弱势日整体偏低是诚实反映。")
             .font(.system(size: 11)).foregroundStyle(LN.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)

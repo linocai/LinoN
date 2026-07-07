@@ -60,6 +60,11 @@ class PositionOut(BaseModel):
 class PositionsList(BaseModel):
     holdings: List[PositionOut]
     free_slots: int
+    # v1.4.1 Phase A:今日盈亏纯展示派生(不落库),前向兼容(旧客户端不读无影响)。
+    today_pnl: float = 0.0
+    today_realized: float = 0.0
+    today_float: float = 0.0
+    today_pnl_partial: bool = False
 
 
 # —— 阶段2 D2/D4:候选 + 深判 —————————————————————————————————————————

@@ -146,7 +146,8 @@ def test_rank_score_empty():
 
 
 def test_rank_score_all_equal_neutral():
-    # 全相等输入(含新因子)→ 每票同分(_normalize 全 0.5 中性;新因子等值不产生区分度)。
+    # 全相等输入 → 每票同分(v1.4.1 Phase C2:vol_ratio/fund 改绝对曲线后,等值输入
+    # 仍产等值分——绝对曲线对等值输入天然给出相同因子分,"每票同分"结论仍成立)。
     scores = _rank_score([2.0, 2.0], [50.0, 50.0], [10.0, 10.0], [0.8, 0.8],
                          vwap=[True, True], breakout=[False, False], mv=[100.0, 100.0],
                          active=[False, False], day=[3.0, 3.0])
@@ -256,6 +257,48 @@ def test_day_surge_warn_text():
     assert rules.day_surge_warn_text(9.0) is not None     # 阈值起点触发
     assert "单日强弩之末" in rules.day_surge_warn_text(9.5)
     assert rules.day_surge_warn_text(None) is None
+
+
+# —— v1.4.1 Phase C2:两因子绝对曲线边界(plan §4.2)——————————————————————
+
+def test_vol_ratio_score_boundaries():
+    assert rules.vol_ratio_score(0.5) == 0.0         # 缩量,无意义
+    assert rules.vol_ratio_score(-1.0) == 0.0        # 负值兜底
+    assert rules.vol_ratio_score(1.0) == 0.0          # 拐点起点(含端点)→ 0
+    assert rules.vol_ratio_score(2.0) == pytest.approx(0.5)   # 中点线性
+    assert rules.vol_ratio_score(3.0) == 1.0          # 拐点终点(含端点)→ 1
+    assert rules.vol_ratio_score(5.0) == 1.0          # 超过封顶恒 1
+    # 单调不减
+    assert rules.vol_ratio_score(1.5) < rules.vol_ratio_score(2.5)
+
+
+def test_fund_rate_score_boundaries():
+    assert rules.fund_rate_score(0.0) == 0.0          # 持平不加分(含端点)
+    assert rules.fund_rate_score(-5.0) == 0.0         # 净流出不加分
+    assert rules.fund_rate_score(7.5) == pytest.approx(0.5)   # 中点线性
+    assert rules.fund_rate_score(15.0) == 1.0         # 拐点终点(含端点)→ 1
+    assert rules.fund_rate_score(30.0) == 1.0         # 超过封顶恒 1
+    # 单调不减
+    assert rules.fund_rate_score(3.0) < rules.fund_rate_score(10.0)
+
+
+def test_vol_ratio_score_and_fund_rate_score_equal_input_equal_output():
+    """等值输入产等值分(替代旧 _normalize 全 0.5 中性的等值不变式)。"""
+    assert rules.vol_ratio_score(2.0) == rules.vol_ratio_score(2.0)
+    assert rules.fund_rate_score(8.0) == rules.fund_rate_score(8.0)
+
+
+def test_rank_score_vol_ratio_absolute_curve_monotonic_relation_holds():
+    """绝对曲线下,vol_ratio 单调递增区间内的相对关系仍成立(量比越大排序分越高,
+    plan §4 施工盯防:若不成立说明接线错,不是曲线设计问题)。"""
+    scores = _rank_score([1.5, 2.5], [50.0, 50.0], [10.0, 10.0], [0.8, 0.8])
+    assert scores[1] > scores[0]
+
+
+def test_rank_score_fund_rate_absolute_curve_monotonic_relation_holds():
+    """绝对曲线下,fund_rate 正区间内的相对关系仍成立(资金占比越高排序分越高)。"""
+    scores = _rank_score([2.0, 2.0], [5.0, 12.0], [10.0, 10.0], [0.8, 0.8])
+    assert scores[1] > scores[0]
 
 
 # —— fetch:_enrich_form 内存算放量/新高/60日涨幅/均线 ————————————————
@@ -648,7 +691,9 @@ def test_pipeline_candidate_shape():
     assert c["volMultiple"] == "2.8x"
     assert isinstance(c["volPct"], int) and 0 <= c["volPct"] <= 100
     assert c["flow"] == "+1.20亿"   # 12000 万 → 1.20 亿
-    assert c["score"] == 100        # 单票 → 中性满分 100
+    # v1.4.1 Phase C1 绝对口径:单票不再强制中性满分 100,score 按其自身原始加权分算,
+    # 落 [0,100] 区间即可(不再依赖池内 min-max)。
+    assert isinstance(c["score"], int) and 0 <= c["score"] <= 100
 
 
 # —— 阶段3.1 pipeline:新因子改排序 + warn 合并 + score 打分展示 ——————————————
@@ -685,10 +730,11 @@ def test_pipeline_warn_merges_high_and_surge():
 
 
 def test_pipeline_score_range_and_same_order_as_rank():
-    """score ∈ [SCORE_FLOOR,100] 整数;rank=1 → score=100;末位 = SCORE_FLOOR;不改 rank 次序
-    (plan Phase C 验收4 两票池断言)。"""
-    from app.screen import rules
-    # 三票放量梯度 → 原始分梯度 → 归一后 [100, 中间, SCORE_FLOOR]
+    """v1.4.1 Phase C1 绝对口径:score ∈ [0,100] 整数,不改 rank 次序(与 rank 同序降序)。
+
+    末位不再恒为旧 SCORE_FLOOR——绝对口径下按各自原始加权分独立算,允许任意低值
+    (甚至 0),这正是"弱势票诚实显低分"的设计目标(plan §4.2)。
+    """
     rows = [
         _sr("600001", "弱", "银行", vol_mult=1.6),
         _sr("600002", "强", "银行", vol_mult=5.0),
@@ -700,38 +746,53 @@ def test_pipeline_score_range_and_same_order_as_rank():
     ranks = [c["rank"] for c in out]
     # rank 严格升序(排序不变)
     assert ranks == [1, 2, 3]
-    # score 整数、值域 [SCORE_FLOOR,100]、与 rank 同序(降序)
+    # score 整数、值域 [0,100]、与 rank 同序(降序)
     for s in scores:
-        assert isinstance(s, int) and rules.SCORE_FLOOR <= s <= 100
-    assert scores[0] == 100                    # rank=1 → 100
-    assert scores[-1] == rules.SCORE_FLOOR     # 末位 = SCORE_FLOOR(非 0)
+        assert isinstance(s, int) and 0 <= s <= 100
     assert scores == sorted(scores, reverse=True)   # 与 rank 同序
 
 
-def test_pipeline_two_stock_pool_score_not_100_and_0():
-    """两票池(原始分极小差距)归一后 = [100, SCORE_FLOOR](不再是 100/0,plan §4.0 🟡#4)。"""
-    from app.screen import rules
-    # 两票几乎所有因子相同,仅放量差一点点 → 原始分差极小
+def test_pipeline_two_stock_pool_score_matches_absolute_formula():
+    """两票池展示分逐票独立按 clamp(raw*100,0,100) 算(v1.4.1 Phase C1,plan §4.2)——
+    用 rank_score 反推期望值锁定,证明展示分不再依赖池内 min-max(而是 raw*100 clamp)。
+    两票 vol_ratio(2.001/2.000)在 Phase C2 绝对曲线下几乎同分,展示分差应极小。"""
     rows = [
         _sr("600001", "略强", "银行", vol_mult=2.001),
         _sr("600002", "略弱", "银行", vol_mult=2.000),
     ]
     snap = MarketSnapshot(trade_date="2026-05-06", rows=rows)
     out = pipeline.build_candidates(snap)
+
+    # 用同样入参重放 rank_score 算原始分,验证展示分 = clamp(raw*100, 0, 100)(逐票独立)。
+    raws = rules.rank_score(
+        vol_ratios=[2.001, 2.000], fund_3d=[0.0, 0.0], turnovers=[5.0, 5.0],
+        pos_healths=[0.8, 0.8], vwap_oks=[False, False], breakout_oks=[False, False],
+        total_mv_yis=[0.0, 0.0], actives=[False, False], day_pcts=[3.0, 3.0],
+    )
+    expected = sorted(
+        [int(round(max(0.0, min(100.0, r * 100)))) for r in raws], reverse=True
+    )
     scores = sorted([c["score"] for c in out], reverse=True)
-    assert scores == [100, rules.SCORE_FLOOR]   # 不是 [100, 0]
+    assert scores == expected
+    # 两票几乎全同因子(vol_ratio 绝对曲线下 2.001/2.000 几乎同分)→ 分差应极小
+    # (不再被强行拉开到 100 vs 旧 SCORE_FLOOR)。
+    assert abs(scores[0] - scores[1]) <= 1
 
 
-def test_pipeline_single_and_all_equal_score_neutral_100():
-    """单票 / 全相等 survivors → score 全为 100(中性满分,退化,plan Phase C 验收4)。"""
-    # 单票
+def test_pipeline_single_and_all_equal_score_equal_not_necessarily_100():
+    """v1.4.1 Phase C1 绝对口径:单票 / 全相等 survivors 不再强制中性满分 100——
+    绝对曲线对等值输入产等值分(仍相等,原"全相等→同分"结论成立),但具体值由各自
+    原始加权分决定,不由池内 min-max 兜底为 100(plan §4.2)。
+    """
+    # 单票:落 [0,100] 区间,不断言恒为 100
     single = pipeline.build_candidates(
         MarketSnapshot(trade_date="2026-05-06", rows=[_sr("600000", "唯一", "银行")]))
-    assert single[0]["score"] == 100
-    # 两票全因子相等
+    assert isinstance(single[0]["score"], int) and 0 <= single[0]["score"] <= 100
+    # 两票全因子相等 → 等值输入产等值分(仍相等,但不再断言为 100)
     rows = [_sr("600001", "A", "银行"), _sr("600002", "B", "银行")]  # 完全相同参数
     out = pipeline.build_candidates(MarketSnapshot(trade_date="2026-05-06", rows=rows))
-    assert all(c["score"] == 100 for c in out)
+    scores = [c["score"] for c in out]
+    assert scores[0] == scores[1]
 
 
 def test_run_pipeline_degraded_on_failed_snapshot():
@@ -739,6 +800,64 @@ def test_run_pipeline_degraded_on_failed_snapshot():
         return MarketSnapshot.fail("2026-05-06", "token 缺失")
     rows, degraded, reason, td = pipeline.run_pipeline("20260506", snapshot_fn=_fail)
     assert rows == [] and degraded is True and "token" in reason
+
+
+# —— v1.4.1 Phase C1:_normalize_scores 绝对口径单测(plan §4 Phase C 验收2)————————
+
+def test_normalize_scores_negative_raw_clamped_to_zero():
+    assert pipeline._normalize_scores([-0.5]) == [0]
+
+
+def test_normalize_scores_over_one_raw_clamped_to_100():
+    assert pipeline._normalize_scores([1.5]) == [100]
+
+
+def test_normalize_scores_normal_values():
+    assert pipeline._normalize_scores([0.4]) == [40]
+    assert pipeline._normalize_scores([0.8586]) == [86]
+
+
+def test_normalize_scores_empty():
+    assert pipeline._normalize_scores([]) == []
+
+
+def test_normalize_scores_multiple_independent_of_pool():
+    """逐票独立 clamp,不依赖池内其余值(与旧 min-max 的关键区别)。"""
+    assert pipeline._normalize_scores([0.1, 0.9]) == [10, 90]
+
+
+# —— v1.4.1 Phase C1:展示分跨天可比性(plan §4 Phase C 验收4)——————————————————
+
+def test_display_score_comparable_across_different_pools():
+    """两批不同池、含相同原始分的票 → 展示分相同(证明脱离池内相对,跨天可比)。"""
+    pool_a = [
+        _sr("600001", "A强", "银行", vol_mult=5.0),
+        _sr("600002", "A中", "银行", vol_mult=2.0),
+    ]
+    pool_b = [
+        _sr("600003", "B强", "银行", vol_mult=5.0),   # 与 pool_a 首票原始分理论相同
+        _sr("600004", "B弱", "银行", vol_mult=1.6),
+        _sr("600005", "B更弱", "银行", vol_mult=1.55),
+    ]
+    out_a = pipeline.build_candidates(MarketSnapshot(trade_date="2026-05-06", rows=pool_a))
+    out_b = pipeline.build_candidates(MarketSnapshot(trade_date="2026-05-06", rows=pool_b))
+    score_a_strong = next(c for c in out_a if c["code"] == "600001")["score"]
+    score_b_strong = next(c for c in out_b if c["code"] == "600003")["score"]
+    # 两票除池组成不同外因子完全一致 → 展示分应相同(跨池/跨"天"可比)
+    assert score_a_strong == score_b_strong
+
+
+# —— v1.4.1 Phase C:回测不受影响(plan §4.2 查证结论,锁定断言)——————————————————
+
+def test_backtest_does_not_consume_score_field():
+    """backtest.py 分位统计只吃 rank/tag/verdict,不读 score——score 改绝对口径
+    不影响回测链路(plan §4.2 查证结论锁定)。"""
+    import inspect
+
+    from app.screen import backtest
+
+    src = inspect.getsource(backtest)
+    assert '["score"]' not in src and ".get(\"score\"" not in src
 
 
 def test_run_pipeline_no_candidates():

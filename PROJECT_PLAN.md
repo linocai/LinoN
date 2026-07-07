@@ -55,6 +55,7 @@
 - **门禁数字**:**已发布 3 阶段**(阶段1+阶段2+v1.2.1,live `https://ln.linotsai.top`,阶段2 于 2026-06-28 上线、v1.2.1 于 2026-07-02 两步上线;阶段2.5/阶段3/阶段3.1 为纯后端/全栈小版本随部署链路一并上线;`app/db/store.py` 单文件在 ECS 已不存在,store 拆包首次真上生产;**v1.3.0 已部署上线(2026-07-04)**;**v1.3.1 已部署上线(2026-07-05)**;**v1.4 已部署上线(2026-07-05)**)。**阶段4(K线/舆情/双端真机 E2E)待规划**。后端 pytest **498 全绿**(阶段1 基线 105 + 阶段2 新增 88 → 193 + 阶段2.5 新增 34 → 227 + 阶段3 新增 49 → 276 + 阶段3.1 新增 33 → 309 + v1.2.1 新增 28 → 337 + v1.3.0 新增 41 → 378 + v1.3.1 新增 72 → 450 + v1.4 新增 48);客户端 XCTest **115 全绿**(17 + 阶段2 新增 15 → 32,阶段2.5 无前端改动,阶段3 新增 8 → 40,阶段3.1 新增 4 → 44,v1.2.1 新增 5 → 49,v1.3.0 新增 16 → 65,v1.3.1 新增 30 → 95,v1.4 新增 20);**双端 build iOS Simulator + macOS 各 `BUILD SUCCEEDED`**;真 key 活体冒烟过(Tushare 5490 行/茅台白酒归类符合假设;DeepSeek `json_object` 真输出夹紧成合法 DeepAnalysis;analyze/coach/chat 真 key curl 闭环;离屏快照逐屏目检候选行/满仓🔒/深析卡 fund_asof/教练红橙卡;阶段2.5 真 token 限频冒烟 65/65 天 adj_factor 全部成功,零限频失败,耗时 39s→45.5-45.7s)。阶段2 新增端点 **4 个**:`GET /candidates`、`POST /candidates/refresh`、`POST /candidates/{code}/analyze`、`POST /positions/{id}/coach`;阶段2.5 新增只读端点 **1 个**:`GET /candidates/outcomes`;阶段3 新增端点 **3 个**(`GET /review`、`POST /review/{week}/note`、`GET /memory`)+ `/coach` 新增可选字段 `review_ref`;阶段3.1 无新增端点,`GET /candidates` 候选 dict 新增可选展示字段 `score`(int,前向兼容);v1.2.1 新增端点 **1 个**:`POST /chat`;v1.3.0 新增端点 **1 个**:`GET /positions/correlation`;v1.3.1 新增端点 **2 个**:`GET/PUT /api/v1/screen/config`,`GET /candidates` 新增可选字段 `warnLevel`;v1.4 新增端点 **1 个**:`GET /candidates/intraday`。**第四次真 migration**:`candidates.warn_level` 列;**新表**:`screen_config`。v1.4 起零新增 migration、零新表。
 - **v1.3.1(盘后选股完善)已完工收口(已部署上线)**:三块——① 新选股逻辑(删高位硬排除改只标注红/琥珀分级、粗筛量比口径接 `daily_basic.volume_ratio`、排序换 9 因子集含距60日高点 `pos_health`/横盘突破 `breakout_ok`、warnLevel 经 candidates 缓存表往返=**第四次真 migration `warn_level` 列**)、② 选股配置可调化(档 B·App 内调参屏 + 新表 `screen_config` 存 JSON 增量 + `GET/PUT` 端点 + 显式穿参生效不 monkeypatch、rules 常量降级为默认值/fallback、深判层不吃配置)、③ 候选刷新改纯手动(删 15:35 自动 tick + `run_candidate_refresh` 死码,回填改挂 `last_eod_date` 守卫的 EOD 块)。持仓教练深判重做②/盘中选股独立板块③已定移 **v1.4**,本版不碰。走完整工作流:planner→plan-critic(1 致命[warnLevel 缓存断层]+6 重要+6 建议全吸收)→builder 三批(批1 后端 A+C/批2 后端 B/批3 前端)→reviewer(Fable·0 致命/3 🟡/8 🔵)→主会话审后修复(🟡#1 跨字段带内一致性 `_enforce_band_consistency` + 🟡#2 调参屏按钮加载态守卫 + 用户新增 `mv_mega_ceil` 可调化 500→1500)。门禁:后端 pytest **378→450 全绿**(批1+25/批2+40/批3 前端/审后+7);客户端 XCTest **65→95 全绿**;双端 `BUILD SUCCEEDED`。新增端点 **2 个**:`GET/PUT /api/v1/screen/config`。第四次真 migration:`candidates.warn_level` 列。新表:`screen_config`(`CREATE TABLE IF NOT EXISTS`,非 ALTER)。全文 `archive/v1.3.1_plan.md` + `archive/REVIEW_REPORT_v1.3.1.md`;8 🔵 建议入 §5。**已部署上线 2026-07-05**(第四次 migration + `screen_config` 建表幂等落地、479 候选历史无损;prod 验通:配置端点 22 键默认 + PUT/恢复默认清行、新 9 因子 refresh count=168、warnLevel amber 经缓存表往返;macOS 已 Release 换包,iOS 留用户;详见 `~/Lino/hz_info.md`)。
 - **v1.4(盘中上下文:教练 + 候选续强确认)已完工收口**:两件事——② coach/对话注入实时盘中上下文(`app/data/intraday.py` 4 个纯函数 + `analyze.py`/`prompt.py`/`app.py` 接线,`_is_intraday_window` 唯一时段判定含午休,VWAP=`amount/(volume×100)` 元/股,盘中上下文只补充 LLM 事实不改 verdict/advice);③ 候选池「今日续强确认」新端点 `GET /api/v1/candidates/intraday`(读时叠加不落库,批量拉价+逐票 prev5 均量按 `(code,trade_date,today)` 缓存)+ 双端盘中确认视图(CandidatesView 加按钮 + 叠加行)。走完整工作流:planner→plan-critic(1 致命[VWAP 单位差100倍]+3重要+6建议全吸收)→builder 三批(批1 Phase A/批2 Phase B+C/批3 Phase D)→reviewer(Fable·0 致命/3 🟡/8 🔵,`archive/REVIEW_REPORT_v1.4.md`)→审后修复(3 🟡 全修:「盘中确认」按钮永久禁用改可复活/prev5 口径修回 `vols[:5]`/`chat_stock` 类型对齐;5 🔵 顺手修,含新增 `backend/scripts/smoke_intraday.py` 冒烟脚本)。**关键决策/偏离**:Phase E(两源盘中真复测冒烟)**用户拍板取消**(2026-07-05 晚),改为用户周一(7/6)实盘使用时直接验证,冒烟脚本已就绪备用;§3 旧"待联调:实时价源盘中真复测"欠账因此仍未闭合,如实保留(脚本已备、待实盘验证)。门禁:后端 pytest **450→498 全绿**;客户端 XCTest **95→115 全绿**;双端 `BUILD SUCCEEDED`;新增端点 **1 个**:`GET /candidates/intraday`;**零 migration、零新表**。全文 `archive/v1.4_plan.md` + `archive/REVIEW_REPORT_v1.4.md`;3 条推迟 🔵 建议入 §5。**已部署上线 2026-07-05**(零 migration、后端增量 rsync + 重启,679→647 候选历史/3 持仓无损;prod 验通:`GET /candidates/intraday` 非交易时段返 `isTrading:false` 全 null 降级正确、`/positions` 存量无损;macOS 已 Release 换包,iOS 留用户;详见 `~/Lino/hz_info.md`)。
+- **v1.4.1(今日盈亏 + 选股分绝对口径)施工中·批1(Phase A+C+D)已完工**:① Phase A——新增纯函数模块 `app/api/today_pnl.py`(`today_realized_amount`/`today_float_pnl`),`GET /positions` 新增 `_resolve_quotes_map` 复用同一拍 Quote 派生 price+pre_close(不二次拉价),响应体扩 4 字段 `today_pnl/today_realized/today_float/today_pnl_partial`(前向兼容);② Phase C——`_normalize_scores` 改绝对 clamp(`raw×100` 夹 `[0,100]`,删 `SCORE_FLOOR`),`rules.py` 新增 `vol_ratio_score`/`fund_rate_score` 两条绝对曲线替换 `rank_score` 内 `_normalize`(该函数随之成孤儿已删),`candidates.list_candidates` score NULL 回读改省略键(不再兜底 0),客户端 `scoreNote` 文案同步改绝对口径措辞;③ Phase D——`_candidate_basis_date` 补窗口判断(交易日且 `now≥15:35` 才用今天,新增模块级常量 `_CANDIDATE_EOD_READY`),修复阶段2 reviewer 🔵#1 升格的盘中刷新空转真 bug。三 Phase 相互独立、零 migration、零新表、零新端点。门禁:后端 pytest **498→532 全绿**(A 新增 18/C 新增净 12/D 新增 4,含 3 处存量测试按新绝对口径改写:`test_screen.py` 两条 SCORE_FLOOR 断言 + 一条 `_normalize` 相关注释 + `test_candidates_migration.py` NULL 回读断言)。Phase B(客户端今日盈亏展示)与批2/3 待续。
 - **上线即空仓**:无存量持仓迁移,无 legacy / 既往不咎机制,`positions` 从 0 行起。
 - **止损线机械派生**:`stop_line = buy_price × 0.95`,**纯派生、不落库**(-10% 极强趋势例外已砍,止损恒为 ×0.95;与持仓天数同样按读取时算,单一事实源),系统自动算,**拒绝用户手填**。
 - **ECS 现实**:`deploy@118.178.122.194:/opt/linon`,systemd **单 unit** `linon.service` **active**(端口 **8001**,监控作 app 内后台轮询、不另起进程),nginx `ln.linotsai.top` + certbot 证书;内存紧(1.6G+2G swap),已占端口 8000/8787/5432/80/443/8001;`.env`/`.p8` 均 600 `linon:linon`。
@@ -72,9 +73,101 @@
 | 4 收尾(**待规划**) | — | K 线/分时图、舆情展示、双端真机 E2E 打磨 |
 | V2(推后) | 历史行情重放 / 纪律陪练沙盒(陪练非裁判) | 临场纪律陪练 |
 
-## 4. 当前版本 Plan(占位)
+## 4. 当前版本 Plan(v1.4.1:今日盈亏 + 选股分绝对口径)
 
-下一版本待规划。v1.4(盘中上下文:教练 + 候选续强确认)已完工收口,全文见 `archive/v1.4_plan.md`。
+> 用户实盘反馈(2026-07-06/07):① 今日板块加「今日盈亏」(跨前后端,Phase A+B——今日割一票净亏 ~370 已落 `net_pnl_amount` + 现持 3 票浮盈 ~700,今日板块只显浮动 +700、含已割不可见,与同花顺不一致);② 选股展示分改绝对口径 + 两因子绝对化(Phase C 纯选股层;评分组成 UI 本版**不做**,留 Backlog);③ 候选刷新基准日盘中回退(Phase D 后端——07-07 盘中实锤:盘中刷新 200 但列表不变,阶段2 reviewer 🔵#1 升格真 bug)。**零 schema migration、零新表、零新端点**(①随 `GET /positions` 扩字段,②③纯后端改写)。
+
+### 技术选型(锁定,不留施工阶段选择)
+
+- **今日盈亏纯展示派生**:不落库、不改 `trades`/`positions` 写路径、不加新表新列。后端在 `GET /positions` 响应体新增顶层聚合字段随包返回,客户端不再单独拉 `trades`。
+- **今日盈亏口径(同花顺式,已与用户对齐)**:`今日盈亏 = 今日已实现 + 今日浮动`。
+  - **今日已实现** = `trades` 表中 `close_time` 日期属今日的行的 `net_pnl_amount` 求和(净额,含费,与用户割票口径一致)。`net_pnl_amount IS NULL` 的旧行(v1.3.0 迁移前无净额)**退化为跳过不计入**(与复盘 `netPnlTotal` 只 sum 非空行的既有口径一致,不兜 0 免污染)。
+  - **今日浮动** = `Σ 持仓 (price − todayBase) × qty`,`todayBase` = **今日新买(`buy_date == 今日`)用 `buy_price`,否则用 `pre_close`(昨收)**。
+  - `pre_close` 来源:`GET /positions` 拉的那一拍 Quote(`realtime.Quote.pre_close`,现成)。**盘后=收盘价快照 → 昨收如实是上一交易日收盘;盘中=当日昨收快照**。
+- **今日盈亏降级(定死)**:某持仓 `pre_close` 缺失/≤0 或 `price` 缺失/≤0(停牌/拉价失败)→ 该持仓**今日浮动记 0**(不猜、不用 buy_price 冒充昨收,除非它是今日新买)+ 置整体 `partial`,不阻塞其余持仓与整体聚合。整体永不 500;后端把能算的算出、算不出的部分体现在"降级标记"里(见 §4.1 契约)。
+- **"今日"日期基准(定死)**:后端 `date.today()`(ECS 本地时区,与 `_current_trade_date`/close_time 存储同源)。非交易日/盘前:今日已实现按 `close_time` 日期匹配(非交易日通常无平仓 → 0);今日浮动按最新快照(`price` vs `pre_close`)如实算。🟡4 **非交易日/盘前的快照如实显示上一交易日全天变动(与同花顺一致),不是 0**——例:周六快照 `price`=周五收盘、`pre_close`=周四收盘,今日浮动 = 周五全天变动;交易日 9:25 前同理。行为可接受、非 bug;测试作者注意别写"今日浮动≈0"的错误断言。
+- **展示(客户端)**:今日板块**浮动盈亏与今日盈亏并排**,各自标注口径(浮动=持仓市值−成本;今日=今日已实现+今日浮动)。今日盈亏染色走 pnl 派生(`>=0` 绿、`<0` 红,绿涨红跌)。降级时今日盈亏值仍显示(能算多少算多少),但标注"部分持仓缺今日行情数据"(🔵10:涵盖停牌/拉价失败,不只"无昨收")。
+- **选股展示分绝对口径**:`_normalize_scores`(池内 min-max→`[10,100]`)**替换为** `原始加权分 × 100`,跨天可比、弱势日诚实显低分。边界处理见 §4.2。
+- **两因子绝对化**:`rank_score` 里 `vol_ratio`/`fund` 从 `_normalize`(池内 min-max)改为**绝对评分曲线**(各产 `[0,1]`),曲线形状定死见 §4.2。
+
+### Phase 拆分
+
+**Phase A(后端·全栈依赖起点):今日盈亏聚合进 `GET /positions`**
+- **纯函数** `app/api/today_pnl.py`(新建纯函数模块,不联网、可注入、可单测):
+  - `today_realized_amount(trades: list, today: str) -> float`(🔵6:直接 `-> float`,无 Optional):对 `close_time` 日期部分 == `today` 且 `net_pnl_amount is not None` 的行求和;**无匹配行 → 返回 0.0**;日期匹配用 `str(close_time)[:10] == today`(兼容 `"YYYY-MM-DD HH:MM:SS"` 与 ISO8601 `"YYYY-MM-DDTHH:MM:SS"`,两者前 10 位都是 `YYYY-MM-DD`)。
+  - `today_float_pnl(holdings: list, prices: dict, pre_closes: dict, today: str) -> tuple[float, bool]`:遍历持仓,`base = buy_price if buy_date[:10]==today else pre_close`;返回 `(sum, partial)`。**两条降级分支,均记该仓浮动 0 + `partial=True`**:① 🟡1 **price 缺失/≤0**(停牌票新浪返 price=0 → `_resolve_prices` 过滤 → `prices.get(code)` 为 None,`None − pre_close` 会抛 TypeError)→ 无论今日新买与否,拿不到现价就没法算今日浮动,记 0 + partial;② `pre_close` 缺失/≤0 **且非今日新买** → 记 0 + partial(今日新买用 buy_price 作 base,不受昨收缺失影响)。**先判 price 再判 base**。
+- **端点接线**(`app/api/app.py` `list_positions`):
+  - 复用现有 `_resolve_prices` 那一拍(避免重复拉价):新增 `_resolve_quotes_map(codes) -> dict[code, Quote]`,同时供 price 与 pre_close(**每源每次调用 ≤1 拉**,守 CLAUDE.md 拉价纪律;失败降级空 dict)。`list_positions` 内从此 map 派生 prices/pre_closes 两个 dict(避免两拍);price 口径不变。🔵7 **宽容姿势提字段**:`getattr(q, "pre_close", None)`(缺失→None)+ dict 回退(`isinstance(q, dict)` 时 `q.get("pre_close")`),与既有 `_Q(price)` 假 Quote 替身、`lambda codes: {}` 空替身兼容 → 498 条存量测试零改动。**施工盯防**:`_resolve_quotes_map` 改造**不碰坏** `_resolve_prices` 另两个调用点(coach `app.py:657/745`)与 `_quotes_fn` 替身兼容——`_resolve_prices` 保留原签名不动,map 函数独立新增,`list_positions` 内两者取其一。
+  - `today = date.today().isoformat()`;`realized = today_realized_amount(store.list_closed_trades(since=today), today)`(🟡3:`since=today` **裸日期前缀**——`list_closed_trades` 是字符串比较,`sell_time` 可传自由串,存过 `"YYYY-MM-DD"` date-only 串时 `since=f"{today} 00:00:00"` 会把它 SQL 收窄排掉、而纯函数 `[:10]` 本应匹配,违反"since 只少读行、精确判定在纯函数"不变式;裸 `since=today` 对 `" "`/`"T"`/date-only 三种续写都 `>=`,严格超集);再在纯函数里精确按日期前缀过滤;`float_pnl, partial = today_float_pnl(...)`;`today_pnl = realized + float_pnl`。
+- **`schemas.PositionsList` 新增字段**(前向兼容,均有默认值):`today_pnl: float = 0.0`、`today_realized: float = 0.0`、`today_float: float = 0.0`、`today_pnl_partial: bool = False`(true=至少一持仓缺今日行情数据,客户端标注)。
+- **验收**:① 冻结 today(patch `datetime.date`,见 CLAUDE.md D5 坑),注入假 Quote(带 `pre_close`),3 持仓 + 1 条今日已平 trade → 断言 `today_pnl == realized + float` 且数值精确;② `pre_close=0` 的持仓 → 该仓浮动 0 + `today_pnl_partial==True`;②b 🟡1 **`prices` 缺该 code(price=0 停牌)** → 该仓浮动 0 + `partial==True`(不抛 TypeError);③ 今日新买持仓(`buy_date==today`)base 用 buy_price;④ 无今日平仓 → `today_realized==0`;⑤ `net_pnl_amount=NULL` 旧行不计入;⑥ 拉价整体失败 → price/pre_close 全空,今日浮动 0、`partial==True`、不 500;⑦ `close_time` 为 ISO8601(带 `T`)也能按日期匹配;⑧ 🟡4 **冻结到周六**(非交易日)+ buy_date=下一交易日(未来、周一)→ `buy_date[:10]==today` 为 false 走 pre_close 分支(顺带锁 D5 坑),今日浮动如实显示上一交易日全天变动、不为 0。**门禁:后端 pytest 498→≥510(A 新增 ≥12)。**
+
+**Phase B(前端·依赖 A):今日板块加「今日盈亏」**
+- `PortfolioKPIs`(`AppModel.swift`)新增 `todayPnl: Double`、`todayRealized: Double`、`todayFloat: Double`、`todayPnlPartial: Bool`(默认 0/false)。
+- `PositionsListResponse`(`APIClient.swift`)解码新增 `today_pnl`/`today_realized`/`today_float`/`today_pnl_partial`(可选、缺省兜底,兼容旧后端);`fetchPositions()` 回传时透传进 `AppModel`(经新出参或 `AppModel` 存字段,由 builder 定,不改 `portfolioKPIs` 纯派生签名——今日盈亏来自后端不本地重算)。`AppModel.portfolioKPIs` 填 `k.todayPnl` 等字段。
+- **UI**(`KPIViews.swift`):`KPIHeroIOS`(iOS)在浮动盈亏下方/旁并排加「今日盈亏」;`KPIStripMac`(macOS)四联横条改五联或在浮动盈亏卡内并列。两处均标注口径(浮动=市值−成本,今日=今日已实现+浮动),`todayPnlPartial==true` 时今日盈亏旁显小字"部分持仓缺今日行情数据"(🔵10);染色按 `todayPnl>=0` 绿/`<0` 红(绿涨红跌;`todayPnl` 是 Double,直接派生 bool 不用字符串判负,见 CLAUDE.md 绿涨红跌坑)。
+- **验收**:① 双端 `BUILD SUCCEEDED`;② 单测:给定 `PortfolioKPIs` 断言今日盈亏取后端值(不本地重算);③ 离屏快照核对今日盈亏卡渲染(KPI 卡非 ScrollView 包裹,可 `ImageRenderer`,见 CLAUDE.md 快照坑);④ 手动/快照核对负今日盈亏染红、正染绿。**门禁:客户端 XCTest 115→≥118(B 新增 ≥3)。**
+
+**Phase C(后端·独立,可与 A/B 并行):选股展示分绝对口径 + 两因子绝对化**
+- **C1 展示分绝对化**(`pipeline.py` `_normalize_scores`):改为 `[int(round(max(0, min(100, s * 100)))) for s in raw_scores]`(逐票独立,不再依赖池内 min/max)。函数签名/调用点不变(仍 `_normalize_scores(scores) -> List[int]`),只改内部实现;`display_scores = _normalize_scores(scores)` 调用点不动。删除旧 min-max/`SCORE_FLOOR` 逻辑与注释。**连带改测试**:`test_screen.py` 三条断言 `SCORE_FLOOR`(末位=10、两票=[100,10])需按新绝对口径重写(末位不再恒 SCORE_FLOOR,按原始分×100 clamp;两票值由各自原始分决定,不再 [100,10]);`test_candidates_api.py:49` 种子注释同步。
+- **C2 两因子绝对曲线**(`rules.py` 新增两纯函数 + `rank_score` 改接线):
+  - `vol_ratio_score(vr: float) -> float`:量比绝对曲线 → `[0,1]`,形状见 §4.2。
+  - `fund_rate_score(rate_3d: float) -> float`:近3日主力净额占成交额比例合计(%)绝对曲线 → `[0,1]`,形状见 §4.2。
+  - `rank_score` 里 `nv = _normalize(vol_ratios)` / `nf = _normalize(fund_3d)` 改为逐票 `vol_ratio_score(vol_ratios[i])` / `fund_rate_score(fund_3d[i])`(内联进 for 循环或预先列表推导,与其余因子写法对齐)。**其余 7 因子接线一字不动**。`_normalize` 改后仅 `rank_score` 两处调用消失 → 成孤儿函数(全仓唯一消费点,已查证);**保留或删除由 builder 定并写偏离**(删则连带删 `test_screen.py` 无引用测试;留则加注释"仅历史保留")。**连带改测试**:`test_screen.py:149`「全相等输入→每票同分(`_normalize` 全 0.5 中性)」断言需按新口径重写——绝对曲线下等值 vol_ratio/fund 输入仍产**相同因子分**(等值→等分),该测试的"每票同分"结论**仍成立**(所有因子对等值输入都产等值分),但注释里"`_normalize` 全 0.5"的机理说明需改为"绝对曲线对等值输入产等值分"。**施工盯防**:重写 `test_screen.py` 内 rank_score 相对比较断言(如 `129/150/158` 附近的"vol 大者分高""fund 高者靠前"类)时,绝对曲线下这些**单调关系仍应成立**(vol_ratio 单调递增区间内、fund 正区间内绝对曲线也单调递增)——若断言不成立,是接线错(比如把 vol/fund 因子接反),不是曲线设计问题。
+- **C3 客户端文案同步**(纯前端小改,归入 Phase C 交付但改 client 文件):`CandidatesView.swift` 的 `scoreNote` 文案"分数为当日候选池内相对评分,不同日期不可横向比较。" → 改为绝对口径措辞(如"分数为绝对质量分(原始加权分×100),跨日可比;常态 30–70 分属正常,弱势日整体偏低是诚实反映。"🔵11:补"常态 30–70"——绝对口径下 100 分几乎不可达是刻意的诚实低分,防用户以为选股坏了)。
+- **验收**:① `vol_ratio_score`/`fund_rate_score` 纯函数单测:边界(0/负/极大)+ 曲线关键拐点断言;② `_normalize_scores` 单测:负原始分→0、>1 原始分×100→100、正常 0.4→40、0.8586→86;③ `rank_score` 回归:同一批候选换绝对曲线后**排序次序**与旧版可不同(绝对化是刻意行为,非回归)——断言产出在 `[理论域]` 内、不崩、cfg 穿参仍生效;④ 展示分跨天可比性:两批不同池、含相同原始分的票 → 展示分相同(证明脱离池内相对);⑤ 回测不受影响:`backtest.py` 只吃 `rank`(序)与 `tag`/`verdict`、**不吃 `score`**(已查证,`archive`/§4.2 结论),补一条断言或注释锁定;⑥ 缓存兼容:旧缓存行 score 是旧口径分,🟡5 **用户下次手动 `POST /candidates/refresh` 即为新口径**(刷新纯手动,15:35 自动 tick 已于 v1.3.1 删除,自愈时点由用户行为决定,别承诺"≤1 交易日");写明"部署后当日不刷新则旧口径分一直显示,一旦手动刷新即全量新口径"。**门禁:后端 pytest(与 A 合计)→ C 新增 ≥10。**
+
+**Phase D(后端·独立,可与 A/C 并行·无依赖):候选刷新基准日盘中回退**
+- **实盘踩中升格(2026-07-07 盘中实锤)**:用户 9:22/9:24 盘中点「候选刷新」,`POST /candidates/refresh` 返 200 但列表不变(停在 2026-07-03)。**根因**:`app.py:524 _candidate_basis_date` 的 docstring 写"交易日且已过收盘窗口→今天",**实现漏了窗口判断**——交易日一律 `basis=今天`,盘中 Tushare 当日 EOD 未发布 → pipeline degraded 空转,候选停在旧基准日。即阶段2 reviewer 🔵#1「候选刷新基准日盘中不回退」;v1.3.1 删 15:35 自动 tick 后手动盘中刷新成日常路径,打磨项升格真 bug。
+- **修法(定死)**:`_candidate_basis_date` 改为——**交易日且 `now ≥ 15:35` → 今天;否则 → `prev_trading_day(today)`**(非交易日分支不变)。`15:35` 沿用旧自动 tick 的阈值(收盘 15:00 + EOD 发布缓冲),写成**模块级常量**(如 `_CANDIDATE_EOD_READY = time(15, 35)`)并注明语义="EOD 数据发布就绪窗口",**勿散写**。docstring 与实现对齐(补上原缺的窗口判断)。
+- **效果**:盘中刷新 `basis=上一交易日`(其 daily/daily_basic 昨晚已出、moneyflow_dc 盘中给到 T-1,能真刷出候选);盘后(≥15:35)刷新 `basis=今天`,行为同旧 15:35 自动 tick 时代。`_disp_date`/`upsert` 链路不动。
+- **不复用 `_is_intraday_window`**(v1.4 那是 09:30–15:00 盘中交易窗口,含午休、语义是"盘中交易时段";这里要的是"EOD 数据发布窗口 ≥15:35",两者语义不同,勿混用)。
+- **验收**:≥4 条单测,冻结日期+时间(patch `datetime.date` + `datetime.datetime`,涉 today 全冻结,见 CLAUDE.md D5 坑):① 交易日 10:00 → `prev`;② 交易日 15:36 → `today`;③ 非交易日(任意时刻)→ `prev`;④ 边界 **15:35 本身归属**——定死 `now ≥ 15:35`(15:35:00 归 today,写进测试断言)。**门禁:后端 pytest → D 新增 ≥4。**
+
+### 4.1 接口契约(`GET /api/v1/positions` 扩字段)
+
+**响应体新增顶层字段**(其余字段不变):
+```
+{
+  "holdings": [ ... 不变 ... ],
+  "free_slots": 2,
+  "today_pnl": 330.0,          // 今日盈亏 = today_realized + today_float(元)
+  "today_realized": -370.0,    // 今日已实现净额(元;今日 close_time 的 net_pnl_amount 求和,NULL 行跳过)
+  "today_float": 700.0,        // 今日浮动 = Σ(price − todayBase)×qty(元;昨收/现价缺失仓记0)
+  "today_pnl_partial": false   // true=至少一持仓缺今日行情数据(停牌/拉价失败/昨收缺失),今日浮动不完整
+}
+```
+- 认证方式:`Bearer`(复用 `require_token`,同现有端点)。
+- 错误码:无新增。拉价失败/聚合异常一律不 500,降级为 `today_float=0`+`today_pnl_partial=true`。🟡2 **整体聚合抛异常时兜底 `today_pnl_partial=true`**(其余三字段 `today_pnl/today_realized/today_float` 回 0)——最不完整的场景**绝不标 false**(标 false 会让用户看到假 0 却以为是真实完整数据),不掀翻列持仓主流程。
+- 前向兼容:旧客户端不读新字段无影响;新客户端解码新字段用可选 + 兜底,兼容旧后端(返回缺字段时今日盈亏区可隐藏或显"—")。
+
+### 4.2 选股绝对口径 —— 曲线与边界(定死)
+
+- **展示分边界**:正权部分(8 因子权重归一和=1.0)恒落 `[0,1]`,`raw × 100 ∈ [0,100]`;day_surge 罚项(默认权重 -0.06,可调至 -1.0)使总分下界下探到负值。**定死:`raw × 100` 后 clamp 到 `[0, 100]` 取整**——负分一律夹 0(展示语义:0 分=最差,不显负数);上界 100(全正因子满分且无罚)。`SCORE_FLOOR` 旧语义(避免末位恒 0)在绝对口径下**取消**——绝对口径下弱势票诚实显低分甚至 0 是刻意的(与"弱势日诚实显低分"目标一致)。`SCORE_FLOOR` 常量本身有测试断言消费(`test_screen.py` 3 处 + `test_candidates_api.py` 1 处注释),删除时**连带改这些测试**(见 Phase C1),不是纯"无消费点则删"。
+- **`vol_ratio_score(vr)` 绝对曲线**(量比,`daily_basic.volume_ratio`,平量=1.0、粗筛门槛 1.5):分段线性,`vr<=1.0 → 0`(缩量/平量无意义);`1.0 < vr <= 3.0 → (vr-1)/2`(线性 0→1);`vr > 3.0 → 1.0`(3 倍量及以上封顶,防天量票畸高)。形状对齐既有 `day_surge_penalty_norm` 的"阈起点→封顶线性"写法,拐点 `[1.0, 3.0]`。
+- **`fund_rate_score(rate)` 绝对曲线**(近3日主力净额占成交额比例合计 %,相对口径、正=净流入):分段线性,`rate<=0 → 0`(净流出/持平不加分,粗筛已要求近3日净流入>0,此处再给梯度);`0 < rate <= 15 → rate/15`(线性 0→1,15% 三日累计净流入占比视为强);`rate > 15 → 1.0`(封顶,防个别异常高占比畸高)。拐点 `[0, 15]`(%);若冒烟发现真实 `net_mf_rate_3d` 量级系统性偏小/偏大,拐点上限 15 是经验默认、可复盘迭代(标注"不卡生死",同 rules 其余经验阈)。
+- **🔵12 拐点常量注释要求**:两曲线拐点(1.0/3.0/15)落 `rules.py` 模块级常量,注释标"经验默认、可复盘迭代、不卡生死";并点明**与 `vol_ratio_min` 的联动**——用户若经 config 把 `vol_ratio_min` 调到 >3.0,则所有 survivors 的量比都 ≥3.0、`vol_ratio_score` 全饱和为 1.0、该因子失去区分度(已知接受行为,非 bug,注释里写明)。
+- **两曲线与 `SCREEN_CONFIG_SPEC` 的关系(定死,本版不扩配置)**:`vol_ratio_score`/`fund_rate_score` 的拐点(1.0/3.0/15)**不进 `SCREEN_CONFIG_SPEC`**(保持 rules 常量单一源、本版不新增可调键,与既有 pos_health/mv 曲线拐点同样不可调一致)。`vol_ratio`/`fund` 的**权重**(`WEIGHTS["vol_ratio"]=0.30`/`WEIGHTS["fund"]=0.06`)仍在 `SCREEN_CONFIG_SPEC` 可调,不变。
+- **权重与绝对分域的关系(写明,🔵8 精确措辞)**:改因子曲线后,`rank_score` 总分仍是 `Σ 权重×因子分`,九因子分域均 `[0,1]`。**正权部分**(8 因子,权重经 `resolve` 归一到和=1.0)恒落 `[0,1]`;**day_surge 罚项**权重可经 config 调到 `[-1.0, 0]`,故总分下界随之下探(默认权重 -0.06 时下界 -0.06,极端调 -1.0 时可更负)。展示分统一 `×100` 后**一律 clamp `[0,100]`**(负分夹 0)——绝对口径成立不依赖权重固定,负分边界由 clamp 兜死。
+- **回测不受影响(查证结论)**:`backtest.py` 的分位统计(`by_rank_tier`)吃的是候选 dict 的 `rank`(排序序号,`_tier_of(rank)` 分 1-5/6-10/11+ 层)+ `tag`/`verdict`,**完全不读 `score`**。展示分改口径、两因子绝对化改变的是**排序次序与展示分数值**,`rank` 仍由 `rank_score` 排序产生、回测按新 rank 分层统计——语义连续、无断层,不需要改 `backtest.py`。
+- **缓存表往返兼容**:`candidates.score` 列语义从"池内相对分"变为"绝对质量分",**列类型/存取路径不变**(仍 INT,`upsert_candidates`/`list_candidates` 白名单已含 score,不动)。部署后旧缓存行的 score 是旧口径数值(混显),**用户下次手动刷新即自愈**(🟡5:刷新纯手动、15:35 自动 tick 已删,自愈时点由用户决定;不承诺"≤1 交易日"),旧行不回填、不迁移(可接受,写入 §5)。🔵9 **顺手改** `list_candidates` 的 `score` 回读:现 NULL→兜底 0(旧 min-max 口径下 0 是池外值);绝对口径下 0 是合法最低分,与旧 NULL 撞车 → **改 NULL→省略键**(客户端 `Candidate.score` 本是 `Int?`,nil 不显徽章,前向兼容现成),避免旧行显假 0 分。
+
+### 4.3 不动契约(v1.4.1 全期不碰)
+
+3 硬线(止损 -5.0 触发 / 止盈 +15% / D4 强平)、止损止盈 `×0.95`/`×1.15` 派生不落库、D4 `count==4` 语义、守味隔离(教练只注 `history_digest`)、绿涨红跌、规则常量单一源(`store/constants.py` 的 -5.0/+15/D4/容差带,`rules.py` 的选股常量)、v1.4 盘中口径(`_is_intraday_window`/VWAP=`amount/(volume×100)`/prev5=`vols[:5]`)、`should_force_close`/买入日=D1 计数、选股粗筛/深判/其余 7 因子。
+
+### 4.4 施工档位
+
+- **Phase A**:今日盈亏聚合是金额计算但**零落库、零迁移、纯读取派生**,金额只做加法(net_pnl_amount 已由 v1.3.0 costs.py 算好落库,本版只 sum)。**@builder(Sonnet)足够**;plan-critic 把口径(NULL 行跳过 / 昨收降级 / 今日新买 base / ISO8601 日期匹配)审死即可。
+- **Phase B/C**:常规前后端,**@builder(Sonnet)**。
+- **Phase D**:单函数窗口判断 + ≥4 单测,**@builder(Sonnet)**,归入后端批次与 A/C 同批。
+- 无高危区(不触鉴权/迁移/发版脚本/写路径),全程 builder,不需要 builder-pro。
+
+### 4.5 测试策略
+
+- **涉"今日"的测试必须冻结日期**:patch `datetime.date` 类(`_FixedDate.today()`,见 CLAUDE.md D5 坑与 `test_api.py`/`test_candidates_api._freeze_today`);`list_positions` 的 `date.today()` 与 `today_pnl` 聚合都吃冻结值。**Phase D 另需冻结时间**(`datetime.datetime` 判 `now ≥ 15:35`,date + datetime 两处都 patch)。
+- **不联网**:注入假 Quote(带真实比例的 `pre_close`/`price`/`volume`/`amount`)经 `_quotes_fn` 替身;选股测试用样例 `StockRow`/直接调纯函数(`vol_ratio_score`/`fund_rate_score`/`_normalize_scores`),不经真 fetch。
+- **门禁基线**:后端 pytest 498、客户端 XCTest 115 起步。各 Phase 新增下限:A ≥12、C ≥10、D ≥4(后端合计 ≥524);B ≥3(客户端 ≥118)。双端 `BUILD SUCCEEDED`。
 
 ## 4b. 客户端契约(设计稿钉死,阶段 1+ 生效)
 
@@ -95,12 +188,8 @@
 - ~~**② 持仓教练盘中上下文重做**~~:✅ 已完工收口(v1.4 Phase B)。给 coach/持仓对话注入实时盘中上下文(实时价/涨幅/现量折算/站 VWAP + 持仓语境),T-1 EOD 资金**保留但 prompt 钉死约束**防 DeepSeek 编盘中故事。
 - ~~**③ 盘中选股 → 收窄为「今日续强确认」视图**~~:✅ 已完工收口(v1.4 Phase C/D)。只读当日盘后圈的候选缓存 codes,盘中叠加实时价/涨幅/高开/站 VWAP/折算量能。
 - **明确不做(v1.4 防蔓延,长期有效)**:盘中资金层(任何形式,含东财 push2)、全市场盘中选股、④选股展示分绝对口径、miniQMT/Level-2。
-- **④ 选股展示分改绝对口径 + 因子绝对化 + 评分组成 UI**(2026-07-05 用户提出,**维持推迟至选股策略稳定后**):
-  - **现状问题**:展示分 `_normalize_scores` 是**池内 min-max→[10,100]**(排名赋分)——池内最高恒 100、不跨天可比、隐藏绝对质量(弱势日最好的票哪怕原始分 0.4 也显 100)。
-  - **改法**:展示分 = **原始加权分×100**(艾迪精密 0.8586→86),绝对、跨天可比、弱势日诚实显低分。
-  - **连带(必须一起做,否则半吊子)**:`rank_score` 里 `vol_ratio`/`fund` 两因子现仍用 `_normalize`(池内 min-max、相对)→ 改成**绝对评分曲线**(量比/资金率各自 [0,1] 曲线,像 `pos_health`/`turnover_health_score`/`mv_elastic_score` 那样);否则总分仍含两池相对项、不真跨天可比。
-  - **评分组成 UI**:候选卡展开"评分解释"面板(9 因子 权重×因子分=贡献 表 + 横条);需后端把每因子贡献落库或 on-demand 算返回(现 `rank_score` 只存最终分)。
-  - 上线即空仓/低样本期这条价值不大,待选股策略稳定后做。
+- **④ 选股展示分改绝对口径 + 因子绝对化**(2026-07-05 用户提出)→ 前两件**已立项 v1.4.1**(2026-07-06,展示分 = 原始加权分×100 + `vol_ratio`/`fund` 两因子绝对曲线,见 §4 Phase C);**评分组成 UI 仍留 Backlog**(见下)。
+- **④余 评分组成 UI**(Backlog,v1.4.1 明确不做):候选卡展开"评分解释"面板(9 因子 权重×因子分=贡献 表 + 横条);需后端把每因子贡献落库或 on-demand 算返回(现 `rank_score` 只存最终分)。上线即空仓/低样本期这条价值不大,待选股策略稳定后做。
 
 ### 用户侧收尾清单(builder 不碰)
 
@@ -132,7 +221,7 @@
 
 ### reviewer 阶段2 推迟项(全 🔵 建议级,零致命零重要;全文见 `archive/REVIEW_REPORT_阶段2.md`)
 
-- **(打磨)候选刷新基准日盘中不回退**(🔵#1,`loop.py:327`/`app.py:280`):手动 `POST /candidates/refresh` 在交易日盘中调用时 basis=今天、Tushare 当日 EOD 未出 → degraded(不崩、符合契约),拿不到昨日候选;可对"交易日但未过 15:35"回退上一交易日。
+- ~~**(打磨)候选刷新基准日盘中不回退**(🔵#1)~~ → **已升格排入 v1.4.1 Phase D**(2026-07-07 盘中实盘踩中——盘中刷新 `POST /candidates/refresh` 返 200 但列表停在旧基准日;根因 `_candidate_basis_date` 交易日一律 basis=今天、漏 15:35 窗口判断,盘中 Tushare 当日 EOD 未出 → degraded 空转;v1.3.1 删 15:35 自动 tick 后手动盘中刷新成日常路径,打磨项升格真 bug。修法见 §4 Phase D:交易日 `now≥15:35`→今天,否则上一交易日)。
 - **(打磨)`last_candidate_date` 内存防重**(🔵#2,`loop.py:327`):重启/错过窗口可能重算(upsert 幂等无数据损坏,仅冗余拉取);与阶段1 EOD `last_eod_date` 防重同源,**合并一并落库**。
 - **(清理)`StockRow.total_mv_yi` 死字段**(🔵#3,`fetch.py:110,218`):已算未用;若不纳入市值过滤可删,纳入则标 TODO。
 - **(可选)深判单票换手恒 `—`**(🔵#4,`analyze.py:85`):plan 未要求;想补则加单票 `ts_daily_basic(code, fund_asof)` 取 turnover_rate 喂 LLM。
@@ -297,4 +386,5 @@
 - **[2026-07-05] v1.4(盘中上下文:教练 + 候选续强确认)立项**:§4 落定 5 Phase。**核心前提(用户拍板)**:盘中主力资金层整个砍掉(用户肉眼看盘口),**零新增外部数据源、零 schema migration、零新表**,只复用现有新浪/腾讯实时源 + Tushare EOD。**两件事**:② coach/持仓对话注入实时盘中上下文(实时价/涨幅/现量折算/站 VWAP + 持仓语境),T-1 EOD 资金保留但 prompt 钉死约束防 DeepSeek 编盘中故事(Phase B);③ 候选池「今日续强确认」视图——**收窄=只对当日盘后圈的 20 只候选叠加实时态,非全市场盘中选股**(那喂追高病根,明确不做),新端点 `GET /candidates/intraday` 读时叠加不落库(Phase C)+ 双端盘中确认视图(Phase D)。**关键选型(定死不留施工;口径以下一条 plan-critic 修订条为最终准)**:盘中量能口径 = **已开盘时长折算日量**(`current_vol/elapsed_min×240`,跨午休 240min,头 **60min**→early、收盘→closed、缺基准→no_base;明确不选"vs 昨日同时段");VWAP=`amount/(volume×100)`(元/股,`volume<=0`→null 降级);盘中时段以本 feature 专用 `_is_intraday_window`(交易日 09:30–15:00 含午休)判定、窗口外实时字段全 null + 刷新禁用;拉价 on-demand 独立拉一拍(不接 monitor tick、不破"每源每 tick ≤1 拉"纪律);盘中上下文只作 LLM 补充事实不改 verdict/advice 二元派生;新端点复用 `require_token`。**旧债一并收(Phase E)**:两源盘中真复测(§3 待联调挂久),交易时段冒烟验两源价量一致性/VWAP 合理性/量能折算落地数字。**不动契约**:3 硬线/-5.0·-4.9 口径/D4 count==4/守味隔离(只注 history_digest)/绿涨红跌/规则常量单一源/选股因子。门禁基线 pytest 450 / XCTest 95 起步(预计 A+B+C 新增后端 ≥30、D 新增客户端 ≥6)。
 - **[2026-07-05] v1.4 plan-critic 修订(1 致命+3 重要+6 建议,全吸收)**:**致命#1** VWAP 单位写反差 100 倍(`amount/volume`=元/手=100×每股均价、`price≥vwap` 恒 false 且假 Quote 单测照绿)→ 全文改 `vwap=amount/(volume×100)`(元/股),与 `form.py:173` 口径互指(form 是千元/手 ×1000,realtime 归一后元/手只 ×100,勿照抄系数),Phase A.3/E.2/§4 三处同步 + 单测要求用真实比例 amount 造假 Quote。**重要#2** is_trading 判定与折算口径打架(量能设计跨午休/closed,但复用 `loop._is_trading_now` 会把午休判 False 致跨午休设计与 closed 成死码)→ 本 feature 单立 `intraday._is_intraday_window(now)`=交易日且 09:30≤now<15:00(**含午休**,午休累计量/VWAP 有效),B/C 端点均调它、**明令禁复用 loop 窗口**;closed 仅 now==15:00 边缘兜底。**重要#3** 客户端 `get()` 写死 12s 无 timeout 参 → Phase D.2 明写给 `get` 加 `timeout=12` 可选参、盘中确认传 30。**重要#4** coach 路径对同 code 拉两遍 daily(端点 prev5 + `_fetch_form` 各一)→ 改 `_fetch_form` 顺带吐 `prev5_avg_vol`、snapshot 组装下沉编排层(quote 由端点传入、prev5 复用 form,唯一路径),`/chat` 每轮追问不叠额外拉取。**6 建议全收**:#5 prev5 按 `(code,trade_date)` 进程内缓存(仿 `load_industry_map`);#6 chg/openChg 加 `pre_close>0` 除零守卫→null;#7 `asof` 取第一个非空 quote.ts;#8 prompt 两量能数标签区分(「昨日 EOD 放量倍数」vs「盘中折算量比(估算)」)防混谈;#9 客户端「盘中确认」按钮初始可点、以后端 `isTrading` 定禁用(不造日历);#10 客户端叠加按 `code` join 不靠顺序;#11 early 阈 30→**60min**(A 股早盘量能前置、10:30 前折算系统性高估偏多头,提保守阈)+ prompt 护栏句/UI 文案点明"早盘折算通常偏高"。**建议#11 取舍**:采纳"提 early 阈到 60min"这一支(而非仅文案点明),因偏差方向恰好利多怂恿追高、正撞用户追高病根,值得用更保守阈直接屏蔽早盘不可靠折算,并叠加文案双保险。门禁预计后端 ≥30(A≥14/B≥8/C≥8)、客户端 ≥6。待施工。
 - **[2026-07-05] v1.4(盘中上下文:教练 + 候选续强确认)完工收口**:两件事——② coach/对话注入实时盘中上下文(`app/data/intraday.py` 4 个纯函数 + `analyze.py`/`prompt.py`/`app.py` 接线);③ 候选池「今日续强确认」新端点 `GET /candidates/intraday`(读时叠加不落库)+ 双端盘中确认视图。走完整工作流:planner→plan-critic(1 致命[VWAP 单位差100倍]+3重要+6建议全吸收)→builder 三批(Phase A/B+C/D)→reviewer(Fable·0 致命/3 🟡/8 🔵)→审后修复(3 🟡 全修:「盘中确认」按钮永久禁用改可复活/prev5 口径修回 `vols[:5]`/`chat_stock` 类型对齐;5 🔵 顺手修,含新增 `backend/scripts/smoke_intraday.py`)。**关键决策/偏离**:Phase E(两源盘中真复测冒烟)**用户拍板取消**(改由用户周一 7/6 实盘使用时直接验证,冒烟脚本已就绪备用),§3 旧"待联调"欠账因此仍未闭合,如实保留。门禁:后端 pytest 450→498、客户端 XCTest 95→115、双端 `BUILD SUCCEEDED`;新增端点 1 个 `GET /candidates/intraday`;零 migration、零新表。3 条推迟 🔵 入 §5。全文 `archive/v1.4_plan.md` + `archive/REVIEW_REPORT_v1.4.md`。
+- **[2026-07-06] v1.4.1(今日盈亏 + 选股分绝对口径)立项**:§4 落定 3 Phase。**两件事**(用户 7/6 实盘反馈:今日割一票净亏 ~370 + 现持 3 票浮盈 ~700,今日板块只显浮动 +700、今日真实盈亏含已割不可见,与同花顺不一致):① 今日板块加「今日盈亏」(跨前后端,Phase A 后端聚合随 `GET /positions` 扩字段 + Phase B 前端并排展示);② 选股展示分改绝对口径 + `vol_ratio`/`fund` 两因子绝对曲线(Phase C 纯选股层)。**关键选型(定死)**:今日盈亏 = 今日已实现(`trades.close_time` 属今日的 `net_pnl_amount` 求和,NULL 旧行跳过)+ 今日浮动(`Σ(price−todayBase)×qty`,今日新买用 buy_price、否则 pre_close 昨收;昨收缺失/拉价失败 → 该仓浮动 0 + `today_pnl_partial` 标注),**纯展示派生·零落库·零迁移·零新表·零新端点**(①随 `GET /positions` 加 4 字段 `today_pnl/today_realized/today_float/today_pnl_partial`,前向兼容);展示分 = `clamp(原始加权分×100, 0, 100)`(负分/超100 clamp,`SCORE_FLOOR` 弱势票诚实显低语义取消),`vol_ratio_score` 拐点 `[1.0,3.0]`、`fund_rate_score`(近3日净额占比%)拐点 `[0,15]`,两曲线拐点**不进** `SCREEN_CONFIG_SPEC`(rules 常量单一源)、权重仍可调。**查证结论**:`backtest.py` 只吃 `rank`(序)+`tag`/`verdict`,**不吃 `score`**,展示分改口径不影响回测;`candidates.score` 列语义变更但存取路径不变,旧缓存行下次 `refresh` 自愈(混显 ≤1 交易日)。施工全程 @builder(无高危区、无迁移)。门禁基线 pytest 498 / XCTest 115,预计 A≥12 + C≥10(后端≥520)、B≥3(客户端≥118)。**plan-critic 修订(0 致命+5 重要+7 建议,全吸收,「按 5 🟡 修订后进施工」)**:🟡1 `today_float_pnl` 补 price 缺失/≤0 降级分支(停牌票 price=0 → `None−pre_close` 抛 TypeError,改记 0+partial,验收补 ②b);🟡2 整体聚合异常兜底 `today_pnl_partial=true`(原写回 false 自相矛盾、假 0 撒谎);🟡3 `since=today` 裸日期前缀(原 `f"{today} 00:00:00"` 会把 date-only 的 sell_time 串 SQL 排掉、违反"精确判定在纯函数"不变式);🟡4 非交易日/盘前措辞订正为"如实显示上一交易日全天变动(与同花顺一致)"(原"今日浮动≈0"错误、会误导测试断言,验收补冻结到周六 ⑧ 顺带锁 D5 坑);🟡5 删"15:35 下次刷新"陈旧机制(v1.3.1 已删自动 tick,改"用户手动刷新即新口径")。7 🔵 全收:realized 签名 `->float`、`_resolve_quotes_map` 宽容提 pre_close(存量 498 测试零改动)、总分域措辞精确化(day_surge 权重可调 -1.0)、缓存 NULL→省键(撞新绝对口径 0 分)、partial 文案"缺今日行情数据"、scoreNote 补"常态 30–70 分"、曲线拐点常量注释标 vol_ratio_min 联动。另两施工盯防写进对应 Phase(`_resolve_quotes_map` 不碰坏 coach 657/745 调用点 + `_quotes_fn` 替身;C1/C2 相对比较断言绝对曲线下仍成立)。**[2026-07-07 增补 Phase D·总管拍板不走二轮 plan-critic]**:用户今晨盘中实盘踩中——9:22/9:24 点候选刷新 200 但列表停在 2026-07-03,根因 `_candidate_basis_date` docstring 写"过收盘窗口→今天"但**实现漏了窗口判断**(交易日一律 basis=今天,盘中 EOD 未发布 → degraded 空转),即阶段2 reviewer 🔵#1 打磨项、v1.3.1 删 15:35 自动 tick 后手动盘中刷新成日常路径故升格真 bug;用户拍板不热修、并入本版。修法:交易日 `now≥15:35`→今天,否则 `prev_trading_day`(15:35 沿旧自动 tick 阈值、写模块级常量,不复用 v1.4 `_is_intraday_window`——语义是 EOD 数据窗口非盘中交易窗口),≥4 单测冻结日期+时间。门禁 D 新增 ≥4(后端合计 ≥524)。@builder 与 A/C 同批。待施工。
 - **[2026-07-05] v1.4 部署上线 ECS + macOS 换包**:零 migration、零新表、零新 `.env` 键,风险最低一次部署。ECS:`sudo cp -p` 备份 `linon.db.bak-20260705-202943`(3 持仓/0 trades/647 候选历史)→ `sync.sh` rsync 后端增量(新 `app/data/intraday.py` + `app.py`/`analyze.py`/`prompt.py` 增量)→ `systemctl restart linon.service`(非 migration,纯重启)→ `journalctl` 确认 `Application startup complete` 无异常。prod 冒烟:health 200;**新端点** `GET /candidates/intraday` 在周日晚非交易时段返 `isTrading:false`+ 实时字段全 `null`+`volNote:"non_trading"`,验证生产降级路径;`/positions` 存量 3 持仓无损。内存 used 780M/total 1612M,swap 0。macOS 客户端 xcodebuild Release build → `ditto`(非 `cp -R`)换包 `/Applications`,二进制 mtime 12:45→20:31 确认替换、`codesign --verify --deep --strict` 通过;iOS 留用户 Xcode 自行分发。git `aa70269` push origin/main。**回滚锚**= DB 备份 `linon.db.bak-20260705-202943` + 上一版代码 GitHub `8fec598`(v1.3.1 稳定态)。详见 `~/Lino/hz_info.md`。

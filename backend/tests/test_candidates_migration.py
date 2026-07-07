@@ -4,7 +4,8 @@ v1.3.1 A2.5:candidates 表再加 warn_level 列(项目第四次真 migration,高
 覆盖 plan §4.3 Phase C 验收5(复用阶段3 迁移契约姿势 test_review_migration.py):
   ① 对已存在旧 candidates 表(无 score 列)跑 init_db → _ensure_candidates_columns 加列成功;
   ② 连跑 init_db 两/三次不抛 duplicate column、不丢历史行、不改既有值(模拟 ECS 反复重启);
-  ③ 旧行 score=NULL 经 list_candidates 回读为 0 不崩;
+  ③ 旧行 score=NULL 经 list_candidates 回读省略键,不崩(v1.4.1 Phase C 起改省略键,
+     不再兜底 0,见 tests 内注释与 plan §4.2 🔵9);
   ④ upsert_candidates → list_candidates round-trip 带 score 一致;
   ⑤ (见 test_screen.py)现有候选 upsert/list 回读断言同步更新为含 score 键;
   ⑥ pending_backfill_entries 回填逻辑未受影响(仍读 candidates 历史行、未 DROP)。
@@ -115,9 +116,11 @@ def test_init_db_idempotent_no_duplicate_score(tmp_path):
     assert _cols(db).count("score") == 1
 
 
-# —— ③:旧行 score=NULL 经 list_candidates 回读为 0 ————————————————————————
+# —— ③:旧行 score=NULL 经 list_candidates 回读省略键(v1.4.1 Phase C 🔵9)——————————
 
-def test_null_score_reads_back_as_zero(tmp_path):
+def test_null_score_reads_back_omits_key(tmp_path):
+    """v1.4.1 Phase C 起 score 语义变绝对质量分,0 是合法最低分——NULL(迁移前旧行)
+    回读改省略键,不再兜底 0(兜 0 会与合法 0 分撞车,plan §4.2 🔵9)。"""
     db = str(tmp_path / "null_score.db")
     store.init_db(db)
     # 直接底层插一行 score=NULL(模拟迁移前写入的旧行)
@@ -134,7 +137,7 @@ def test_null_score_reads_back_as_zero(tmp_path):
 
     got = store.list_candidates("2026-06-24", db_path=db)
     assert len(got) == 1
-    assert got[0]["score"] == 0   # NULL → 兜底 0,不崩
+    assert "score" not in got[0]   # NULL → 省略键,不兜底 0(与合法 0 分区分)
 
 
 # —— ④:round-trip 带 score 一致 ————————————————————————————————————

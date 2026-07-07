@@ -46,7 +46,7 @@ def _fake_rows(n):
             "tag": "放量突破", "price": 10.0 + i, "chg": "+3.00%",
             "volMultiple": "2.8x", "volPct": 90, "flow": "+1.20亿",
             "turnover": "4.6%", "warn": None,
-            "score": max(10, 100 - (i - 1) * 5),   # rank1→100 递减,末位不低于 SCORE_FLOOR
+            "score": max(0, 100 - (i - 1) * 5),   # rank1→100 递减(绝对口径,v1.4.1 Phase C1)
         })
     return out
 
@@ -787,3 +787,52 @@ def test_candidates_intraday_prev5_cache_avoids_repeat_daily_pull(client, monkey
     assert first_calls >= 1
     c.get("/api/v1/candidates/intraday", headers=AUTH)
     assert calls["n"] == first_calls   # 第二次未再调用(命中缓存)
+
+
+# —— v1.4.1 Phase D:候选刷新基准日盘中回退(plan §4 Phase D)—————————————————
+
+def _freeze_basis_datetime(monkeypatch, app_mod, iso_dt: str) -> None:
+    """冻结 app_mod.datetime.now()(_candidate_basis_date 判断窗口用,同 _freeze_now)。"""
+    from datetime import datetime as _real_datetime
+
+    y, m, d, hh, mm = (int(x) for x in iso_dt.replace("-", " ").replace(":", " ").split())
+    frozen = _real_datetime(y, m, d, hh, mm)
+
+    class _FixedDatetime(_real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen
+
+    monkeypatch.setattr(app_mod, "datetime", _FixedDatetime)
+
+
+def test_candidate_basis_date_trading_day_before_eod_ready_uses_prev(client, monkeypatch):
+    """交易日 10:00(EOD 未发布窗口)→ basis = 上一交易日。"""
+    c, app_mod = client
+    _freeze_today(monkeypatch, "2026-06-23")   # 周二,交易日
+    _freeze_basis_datetime(monkeypatch, app_mod, "2026-06-23 10:00")
+    assert app_mod._candidate_basis_date() == "20260622"
+
+
+def test_candidate_basis_date_trading_day_after_eod_ready_uses_today(client, monkeypatch):
+    """交易日 15:36(EOD 发布就绪窗口)→ basis = 今天。"""
+    c, app_mod = client
+    _freeze_today(monkeypatch, "2026-06-23")
+    _freeze_basis_datetime(monkeypatch, app_mod, "2026-06-23 15:36")
+    assert app_mod._candidate_basis_date() == "20260623"
+
+
+def test_candidate_basis_date_non_trading_day_uses_prev_regardless_of_time(client, monkeypatch):
+    """非交易日(任意时刻,含晚间)→ basis = 上一交易日(不受时间窗口影响)。"""
+    c, app_mod = client
+    _freeze_today(monkeypatch, "2026-06-27")   # 周六,非交易日
+    _freeze_basis_datetime(monkeypatch, app_mod, "2026-06-27 20:00")
+    assert app_mod._candidate_basis_date() == "20260626"
+
+
+def test_candidate_basis_date_boundary_exactly_1535_uses_today(client, monkeypatch):
+    """边界:15:35:00 本身归属 today(定死 now >= 15:35)。"""
+    c, app_mod = client
+    _freeze_today(monkeypatch, "2026-06-23")
+    _freeze_basis_datetime(monkeypatch, app_mod, "2026-06-23 15:35")
+    assert app_mod._candidate_basis_date() == "20260623"

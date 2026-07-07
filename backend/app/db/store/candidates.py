@@ -1,6 +1,8 @@
 """候选缓存表(阶段2 D1/D2:EOD 算一次候选落表,端点读缓存)。
 
-score 列(阶段3.1)由 schema._ensure_candidates_columns 迁移补充;旧行 score=NULL 回读兜底 0。
+score 列(阶段3.1)由 schema._ensure_candidates_columns 迁移补充;v1.4.1 Phase C 起
+score 语义从"池内相对分"改"绝对质量分",0 分是合法最低分——旧行 score=NULL 回读改
+省略键(不再兜底 0,避免与绝对口径下合法 0 分撞车,见 plan §4.2 🔵9)。
 warn_level 列(v1.3.1 A2.5,第四次真 migration)同一函数补充;旧行 warn_level=NULL 回读省略键
 (前向兼容,同 warn 惯例)。
 """
@@ -102,10 +104,12 @@ def list_candidates(trade_date: str, db_path: Optional[str] = None) -> List[Dict
             "volPct": d.get("vol_pct") or 0,
             "flow": d.get("flow") or "",
             "turnover": d.get("turnover") or "",
-            # 阶段3.1:score 展示分。旧行(迁移前写入)score=NULL → 回读兜底 0 不崩
-            # (客户端旧行显示 0 分属预期,这些是待回填的历史缓存、不在当前推荐列表)。
-            "score": d.get("score") if d.get("score") is not None else 0,
         }
+        # v1.4.1 Phase C(🔵9):score 展示分绝对口径下 0 是合法最低分,与旧 NULL 撞车——
+        # NULL(迁移前旧行/无候选)→ 省略键(客户端 Candidate.score 是 Int?,nil 不显徽章,
+        # 前向兼容现成),不再兜底 0(兜 0 会让旧行显示假的"绝对 0 分")。
+        if d.get("score") is not None:
+            cand["score"] = d["score"]
         if d.get("warn"):
             cand["warn"] = d["warn"]
         # v1.3.1 A2.5:warn_level(高位分级红/琥珀)。旧行/无警示票 warn_level=NULL → 省略键

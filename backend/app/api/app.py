@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, time
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -44,6 +44,7 @@ from app.data import intraday
 from app.db import store
 from app.monitor.escalation import EscalationManager
 from app.screen import rules
+from app.api.today_pnl import today_float_pnl, today_realized_amount
 
 logger = logging.getLogger(__name__)
 
@@ -226,10 +227,30 @@ def close_position(position_id: int, body: PositionClose):
 
 @app.get(f"{API_PREFIX}/positions", dependencies=[Depends(require_token)])
 def list_positions() -> PositionsList:
+    from datetime import date
+
     holdings = store.list_holdings()
     # §4b 联调点:后端供 price(客户端算 pnl)。按需拉一拍实时价填 price;
     # flow3d(主力近 3 日净流入)需 Tushare moneyflow,阶段2 接,本期占位。
-    prices = _resolve_prices([h["code"] for h in holdings])
+    # v1.4.1 Phase A:复用同一拍 Quote 同时派生 price 与 pre_close(每源每次调用 ≤1 拉)。
+    quotes_map = _resolve_quotes_map([h["code"] for h in holdings])
+
+    def _quote_field(q, name: str):
+        v = getattr(q, name, None)
+        if v is None and isinstance(q, dict):
+            v = q.get(name)
+        return v
+
+    prices = {}
+    pre_closes = {}
+    for code, q in quotes_map.items():
+        p = _quote_field(q, "price")
+        if p:
+            prices[code] = float(p)
+        pc = _quote_field(q, "pre_close")
+        if pc:
+            pre_closes[code] = float(pc)
+
     out = []
     for h in holdings:
         out.append(PositionOut(
@@ -241,7 +262,24 @@ def list_positions() -> PositionsList:
             flow3d=h.get("flow3d", "—") or "—",
         ))
     free = max(0, store.MAX_HOLDINGS - len(out))
-    return PositionsList(holdings=out, free_slots=free)
+
+    # v1.4.1 Phase A:今日盈亏聚合(纯展示派生,不落库)。整体聚合异常兜底 →
+    # 三字段 0 + partial=true(🟡2:最不完整场景绝不标 false)。
+    try:
+        today = date.today().isoformat()
+        realized_trades = store.list_closed_trades(since=today)
+        realized = today_realized_amount(realized_trades, today)
+        float_pnl, partial = today_float_pnl(holdings, prices, pre_closes, today)
+        today_pnl = realized + float_pnl
+    except Exception:
+        logger.warning("今日盈亏聚合异常(降级 0+partial)", exc_info=True)
+        today, realized, float_pnl, today_pnl, partial = "", 0.0, 0.0, 0.0, True
+
+    return PositionsList(
+        holdings=out, free_slots=free,
+        today_pnl=today_pnl, today_realized=realized,
+        today_float=float_pnl, today_pnl_partial=partial,
+    )
 
 
 # —— v1.3.0 A2:三仓相关性护栏(只提示不拦,只在买入路径查询)——————————————————
@@ -512,16 +550,36 @@ def put_screen_config_endpoint(body: ScreenConfigIn) -> dict:
 
 # —— 候选重算编排(端点 + EOD tick 共用)————————————————————————————————
 
+# v1.4.1 Phase D:候选 EOD 数据发布就绪窗口(沿用旧已删 15:35 自动 tick 的阈值 =
+# 收盘 15:00 + EOD 发布缓冲)。语义="EOD 数据发布就绪窗口",与 app.data.intraday
+# 的 _is_intraday_window(09:30–15:00 盘中交易窗口,含午休)语义不同,勿混用/复用。
+_CANDIDATE_EOD_READY = time(15, 35)
+
+
 def _candidate_basis_date() -> str:
     """候选 EOD 计算基准交易日 'YYYYMMDD'。
 
-    今天是交易日且已过收盘窗口 → 今天;否则取上一交易日(Tushare EOD 数据口径)。
+    交易日且当前时刻 >= _CANDIDATE_EOD_READY(15:35,EOD 数据发布就绪)→ 今天;
+    否则(交易日盘中/盘前 或 非交易日)→ 上一交易日(Tushare EOD 数据口径)。
     注:Tushare 2000 积分实际数据可能滞后,_recompute 内 pipeline 会按此基准日拉,
     拉不到该日则 fetch 返回失败 → degraded(不崩)。
+
+    v1.4.1 Phase D 修复(2026-07-07 盘中实锤):原实现漏了窗口判断,交易日一律
+    basis=今天,导致盘中手动刷新(候选刷新已改纯手动,v1.3.1)时 Tushare 当日 EOD
+    未发布 → pipeline degraded 空转,候选停在旧基准日(阶段2 reviewer 🔵#1 升格真 bug)。
+
+    今天用 `from datetime import date`(与 _current_trade_date 同款,可 patch
+    `datetime.date` 冻结);当前时刻用模块级 `datetime`(顶部 `from datetime import
+    datetime`,与 coach/candidates_intraday 同款,可 monkeypatch app 模块内的
+    `datetime` 名字冻结,见 test_candidates_api._freeze_now)——两条冻结路径都要覆盖。
     """
     from datetime import date
     today = date.today()
-    d = today if is_trading_day(today) else prev_trading_day(today)
+    now = datetime.now()
+    if is_trading_day(today) and now.time() >= _CANDIDATE_EOD_READY:
+        d = today
+    else:
+        d = prev_trading_day(today)
     return d.strftime("%Y%m%d")
 
 
@@ -1010,6 +1068,23 @@ def _default_quotes_fn(codes: list) -> dict:
 
 # 可注入测试替身(避免单测联网)。
 _quotes_fn = _default_quotes_fn
+
+
+def _resolve_quotes_map(codes: list) -> dict:
+    """按需拉一拍实时价,原样返回 {code: Quote}(v1.4.1 Phase A,供 list_positions 同时
+    派生 price 与 pre_close,免二次拉价,守"每源每次调用 ≤1 拉"纪律)。
+
+    与 _resolve_prices 走同一 _quotes_fn 注入口、同一失败降级姿势(异常/无网络 → 空 dict,
+    不阻塞列持仓);_resolve_prices 本身保留不动(coach 端点等另两处调用点不受影响)。
+    """
+    if not codes:
+        return {}
+    try:
+        quotes = _quotes_fn(list(codes))
+    except Exception:
+        logger.warning("列持仓拉实时价失败(quotes map 降级空)", exc_info=True)
+        return {}
+    return dict(quotes or {})
 
 
 def _resolve_intraday_quote(code: str):
