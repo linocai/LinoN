@@ -112,6 +112,17 @@ def test_today_float_pnl_empty_holdings():
     assert partial is False
 
 
+def test_today_float_pnl_new_buy_zero_price_marks_partial():
+    """今日新买但 buy_price<=0(理论不可达,API 层 Field(gt=0) 已挡死;此处防御性兜底)
+    → 记 0 + partial,不让 base=0 把浮动虚增为 price*qty(🔵3)。"""
+    holdings = [_holding("600006", "2026-07-07", 0.0, 100)]   # 今日新买,buy_price=0
+    prices = {"600006": 12.0}
+    pre_closes = {}
+    total, partial = today_float_pnl(holdings, prices, pre_closes, "2026-07-07")
+    assert total == 0.0
+    assert partial is True
+
+
 # —— 端点接线:GET /positions 今日盈亏字段 ——————————————————————————————
 
 def _freeze_today(monkeypatch, iso: str) -> None:

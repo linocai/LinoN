@@ -378,9 +378,12 @@ actor APIClient {
 
     // —— 拉持仓 ——
     // v1.4.1 Phase B:新增 4 个今日盈亏字段,可选 decode 缺省 0/false(兼容旧后端)。
+    // 🔵#4 审后修:todayPnlAvailable 标记 4 键是否真被后端返回(而非 decode 兜底的 0/false),
+    // 旧后端(缺键)→ available=false,客户端据此隐藏今日盈亏卡位而非误显示假 ¥0。
     func fetchPositions() async throws -> (holdings: [Position], freeSlots: Int,
                                             todayPnl: Double, todayRealized: Double,
-                                            todayFloat: Double, todayPnlPartial: Bool) {
+                                            todayFloat: Double, todayPnlPartial: Bool,
+                                            todayPnlAvailable: Bool) {
         let data = try await get("/api/v1/positions")
         let resp = try JSONDecoder().decode(PositionsListResponse.self, from: data)
         let cal = StaticTradingCalendar.shared
@@ -397,9 +400,11 @@ actor APIClient {
             p.flow3d = dto.flow3d
             return p
         }
+        let available = resp.today_pnl != nil
         return (positions, resp.free_slots,
                 resp.today_pnl ?? 0, resp.today_realized ?? 0,
-                resp.today_float ?? 0, resp.today_pnl_partial ?? false)
+                resp.today_float ?? 0, resp.today_pnl_partial ?? false,
+                available)
     }
 
     // —— 开仓 ——

@@ -39,9 +39,11 @@ def today_float_pnl(
     """今日浮动 = Σ (price − todayBase) × qty。
 
     todayBase = 今日新买(buy_date[:10]==today)用 buy_price,否则用 pre_close。
-    两条降级分支,均记该仓浮动 0 + partial=True(先判 price 再判 base):
+    三条降级分支,均记该仓浮动 0 + partial=True(先判 price 再判 base):
     · price 缺失/<=0(停牌/拉价失败)→ 无论今日新买与否,记 0 + partial。
     · pre_close 缺失/<=0 且非今日新买 → 记 0 + partial(今日新买用 buy_price 不受影响)。
+    · 今日新买但 buy_price<=0 → 记 0 + partial(理论不可达,API 层 Field(gt=0) 已挡死;
+      本函数自称独立可注入纯函数,防御性兜底不假设调用方守住该不变式)。
     """
     total = 0.0
     partial = False
@@ -58,6 +60,11 @@ def today_float_pnl(
 
         is_new_buy_today = buy_date[:10] == today
         if is_new_buy_today:
+            if buy_price <= 0:
+                # 防御:buy_price<=0 理论不可达(API 层 Field(gt=0) 已挡死开仓写入口),
+                # 但本函数自称独立可注入纯函数,不假设调用方一定守住该不变式。
+                partial = True
+                continue
             base = buy_price
         else:
             pre_close = pre_closes.get(code)

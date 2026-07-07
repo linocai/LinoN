@@ -73,6 +73,8 @@ struct PortfolioKPIs {
     var todayRealized: Double = 0
     var todayFloat: Double = 0
     var todayPnlPartial: Bool = false
+    // 🔵#4 审后修:旧后端(缺 4 键)/尚未确认可用 → false,今日盈亏卡位应隐藏而非显示假 ¥0。
+    var todayPnlAvailable: Bool = false
 }
 
 @MainActor
@@ -93,6 +95,8 @@ final class AppModel {
     var todayRealized: Double = 0
     var todayFloat: Double = 0
     var todayPnlPartial: Bool = false
+    // 🔵#4 审后修:未确认后端支持前默认 false(隐藏卡位);首次 refresh() 成功后据响应更新。
+    var todayPnlAvailable: Bool = false
 
     // —— 阶段2:候选(GET /candidates;v1.3.0 起后端固定返 Top CANDIDATE_LIMIT=20,不再满仓闭门)——
     var candidates: [Candidate] = []
@@ -212,6 +216,7 @@ final class AppModel {
         k.todayRealized = todayRealized
         k.todayFloat = todayFloat
         k.todayPnlPartial = todayPnlPartial
+        k.todayPnlAvailable = todayPnlAvailable
         return k
     }
 
@@ -256,6 +261,7 @@ final class AppModel {
             self.todayRealized = r.todayRealized
             self.todayFloat = r.todayFloat
             self.todayPnlPartial = r.todayPnlPartial
+            self.todayPnlAvailable = r.todayPnlAvailable
         } catch let e as APIError {
             self.loadError = e.errorDescription
             if case .noToken = e {} else { showToast(e.errorDescription ?? "拉取失败", isError: true) }

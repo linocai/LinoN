@@ -65,7 +65,8 @@ final class AppModelTests: XCTestCase {
 
     // MARK: - v1.4.1 Phase B:今日盈亏(PortfolioKPIs 取后端值,不本地重算)
 
-    /// 默认(旧后端/未刷新前)→ 今日盈亏四字段全 0/false,前向兼容不崩。
+    /// 默认(旧后端/未刷新前)→ 今日盈亏四字段全 0/false,前向兼容不崩;
+    /// todayPnlAvailable 默认 false(🔵#4 审后修:未确认后端支持前应隐藏卡位,不显示假 ¥0)。
     func testPortfolioKPIsTodayPnlDefaultsToZero() {
         let m = AppModel()
         m.holdings = [makePosition(code: "a", buy: 100, price: 110, qty: 100)]
@@ -74,6 +75,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(k.todayRealized, 0, accuracy: 0.001)
         XCTAssertEqual(k.todayFloat, 0, accuracy: 0.001)
         XCTAssertFalse(k.todayPnlPartial)
+        XCTAssertFalse(k.todayPnlAvailable)
     }
 
     /// GET /positions 聚合值经 AppModel 状态透传进 portfolioKPIs,不在客户端重新计算。
@@ -83,11 +85,13 @@ final class AppModelTests: XCTestCase {
         m.todayRealized = -370.0
         m.todayFloat = 700.0
         m.todayPnlPartial = true
+        m.todayPnlAvailable = true
         let k = m.portfolioKPIs
         XCTAssertEqual(k.todayPnl, 330.0, accuracy: 0.001)
         XCTAssertEqual(k.todayRealized, -370.0, accuracy: 0.001)
         XCTAssertEqual(k.todayFloat, 700.0, accuracy: 0.001)
         XCTAssertTrue(k.todayPnlPartial)
+        XCTAssertTrue(k.todayPnlAvailable)
     }
 
     /// 染色走 Double 数值派生(pnlColor),非字符串判负——今日盈亏为负必须染红、为 0/正染绿。
@@ -96,6 +100,28 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(Double(-370.0).pnlColor, LN.down)
         XCTAssertEqual(Double(0).pnlColor, LN.up)   // 0 视为非负 → 绿(与既有 pnlColor 契约一致)
     }
+
+    /// 🔵#4 审后修:旧后端(GET /positions 缺 4 键,decode 为 nil)→ fetchPositions() 返回
+    /// todayPnlAvailable==false,而非误报 available=true 掩盖"值其实是兜底 0"的事实。
+    func testFetchPositionsMarksUnavailableWhenKeysMissing() throws {
+        let json = """
+        {"holdings": [], "free_slots": 3}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(_PositionsListResponseProbe.self, from: json)
+        XCTAssertNil(decoded.today_pnl)
+    }
+}
+
+/// 与 APIClient.swift 内 private PositionsListResponse 同形状的探针(该 struct 是 private,
+/// 无法跨文件直测;此处复刻同一组可选字段验证"缺键→ decode nil"这一 Swift Codable 行为契约,
+/// APIClient.fetchPositions() 的 todayPnlAvailable = (resp.today_pnl != nil) 依赖此行为)。
+private struct _PositionsListResponseProbe: Decodable {
+    let holdings: [Int]?
+    let free_slots: Int?
+    let today_pnl: Double?
+    let today_realized: Double?
+    let today_float: Double?
+    let today_pnl_partial: Bool?
 }
 
 // MARK: - APIError reason 映射

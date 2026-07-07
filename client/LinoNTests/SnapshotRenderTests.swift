@@ -165,4 +165,50 @@ final class SnapshotRenderTests: XCTestCase {
             fundAsof: "2026-06-22", compact: true)
         render(card.padding(16), size: CGSize(width: 390, height: 460), name: "deepcard_ios")
     }
+
+    // MARK: - v1.4.1 🟡#1:今日盈亏 KPI 卡离屏快照(KPIHeroIOS / KPIStripMac)
+
+    private func kpis(todayPnl: Double, partial: Bool, available: Bool = true) -> PortfolioKPIs {
+        var k = PortfolioKPIs()
+        k.marketValue = 128_400
+        k.floatPnl = 708
+        k.floatPnlPct = 5.6
+        k.positionCount = 2
+        k.disciplineRate = 86
+        k.disciplineTrend = 4
+        k.todayPnl = todayPnl
+        k.todayRealized = -370
+        k.todayFloat = todayPnl + 370
+        k.todayPnlPartial = partial
+        k.todayPnlAvailable = available
+        return k
+    }
+
+    func testRenderKPIHeroIOSTodayPnlPositive() {
+        // 浮动 +708 / 今日 +150,partial=false —— 核对并排双列布局不挤压、正值染绿。
+        let view = KPIHeroIOS(kpis: kpis(todayPnl: 150, partial: false))
+            .padding(16)
+        render(view, size: CGSize(width: 390, height: 220), name: "kpi_hero_ios_positive")
+    }
+
+    func testRenderKPIHeroIOSTodayPnlPartial() {
+        // 今日 -150(负,染红)+ partial=true —— 核对"部分持仓缺今日行情数据"注脚可见、不截断。
+        let view = KPIHeroIOS(kpis: kpis(todayPnl: -150, partial: true))
+            .padding(16)
+        render(view, size: CGSize(width: 390, height: 220), name: "kpi_hero_ios_partial")
+    }
+
+    func testRenderKPIStripMacFiveUp() {
+        // macOS 五联横条(市值/浮动/今日盈亏/仓位/纪律)—— 核对今日盈亏卡插入后不挤压其余四卡。
+        let view = KPIStripMac(kpis: kpis(todayPnl: 150, partial: false))
+            .padding(16)
+        render(view, size: CGSize(width: 1180, height: 130), name: "kpi_strip_mac_positive")
+    }
+
+    func testRenderKPIStripMacPartial() {
+        // partial=true + 今日盈亏为负 —— 核对"部分持仓缺今日行情数据"文案完整显示、红色染色正确。
+        let view = KPIStripMac(kpis: kpis(todayPnl: -150, partial: true))
+            .padding(16)
+        render(view, size: CGSize(width: 1180, height: 130), name: "kpi_strip_mac_partial")
+    }
 }

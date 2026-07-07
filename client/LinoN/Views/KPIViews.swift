@@ -25,20 +25,24 @@ struct KPIHeroIOS: View {
                             .foregroundStyle(kpis.floatPnl.pnlColor)
                     }
                 }
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("今日盈亏").font(.system(size: 12)).foregroundStyle(LN.textSecondary)
-                        .padding(.bottom, 4)
-                    Text(LNFmt.signedMoney(kpis.todayPnl))
-                        .font(.system(size: 22, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(kpis.todayPnl.pnlColor)
-                    if kpis.todayPnlPartial {
-                        Text("部分持仓缺今日行情数据")
-                            .font(.system(size: 10.5)).foregroundStyle(LN.textTertiary)
-                            .padding(.top, 2)
+                // 🔵#4 审后修:旧后端(缺 4 键,todayPnlAvailable==false)→ 隐藏今日盈亏卡位,
+                // 不显示误导性的假 ¥0(plan §4.1"缺字段时可隐藏或显—")。
+                if kpis.todayPnlAvailable {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("今日盈亏").font(.system(size: 12)).foregroundStyle(LN.textSecondary)
+                            .padding(.bottom, 4)
+                        Text(LNFmt.signedMoney(kpis.todayPnl))
+                            .font(.system(size: 22, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(kpis.todayPnl.pnlColor)
+                        if kpis.todayPnlPartial {
+                            Text("部分持仓缺今日行情数据")
+                                .font(.system(size: 10.5)).foregroundStyle(LN.textTertiary)
+                                .padding(.top, 2)
+                        }
                     }
                 }
             }
-            Text("浮动=持仓开仓以来 · 今日=今日已实现+今日浮动")
+            Text(kpis.todayPnlAvailable ? "浮动=持仓开仓以来 · 今日=今日已实现+今日浮动" : "浮动=持仓开仓以来")
                 .font(.system(size: 10.5)).foregroundStyle(LN.textTertiary)
                 .padding(.top, 6)
             HStack(spacing: 10) {
@@ -88,10 +92,13 @@ struct KPIStripMac: View {
                  note: LNFmt.signedPct(kpis.floatPnlPct), valueColor: kpis.floatPnl.pnlColor,
                  caption: "持仓开仓以来")
             // v1.4.1 Phase B:今日盈亏与浮动盈亏并排,各自标注口径。
-            card("今日盈亏", value: LNFmt.signedMoney(kpis.todayPnl),
-                 note: kpis.todayPnlPartial ? "部分持仓缺今日行情" : nil,
-                 noteColor: LN.textTertiary, valueColor: kpis.todayPnl.pnlColor,
-                 caption: "今日已实现+今日浮动")
+            // 🔵#4 审后修:旧后端(缺 4 键)→ todayPnlAvailable==false,隐藏此卡而非显示假 ¥0。
+            if kpis.todayPnlAvailable {
+                card("今日盈亏", value: LNFmt.signedMoney(kpis.todayPnl),
+                     note: kpis.todayPnlPartial ? "部分持仓缺今日行情数据" : nil,
+                     noteColor: LN.textTertiary, valueColor: kpis.todayPnl.pnlColor,
+                     caption: "今日已实现+今日浮动")
+            }
             card("仓位", value: "\(kpis.positionCount)/3",
                  note: kpis.positionCount >= 3 ? "满仓" : "\(3 - kpis.positionCount) 可用",
                  noteColor: LN.amber, valueColor: LN.textPrimary)
