@@ -62,6 +62,40 @@ final class AppModelTests: XCTestCase {
         f.price = ""
         XCTAssertNil(f.derivedStop)
     }
+
+    // MARK: - v1.4.1 Phase B:今日盈亏(PortfolioKPIs 取后端值,不本地重算)
+
+    /// 默认(旧后端/未刷新前)→ 今日盈亏四字段全 0/false,前向兼容不崩。
+    func testPortfolioKPIsTodayPnlDefaultsToZero() {
+        let m = AppModel()
+        m.holdings = [makePosition(code: "a", buy: 100, price: 110, qty: 100)]
+        let k = m.portfolioKPIs
+        XCTAssertEqual(k.todayPnl, 0, accuracy: 0.001)
+        XCTAssertEqual(k.todayRealized, 0, accuracy: 0.001)
+        XCTAssertEqual(k.todayFloat, 0, accuracy: 0.001)
+        XCTAssertFalse(k.todayPnlPartial)
+    }
+
+    /// GET /positions 聚合值经 AppModel 状态透传进 portfolioKPIs,不在客户端重新计算。
+    func testPortfolioKPIsTodayPnlPassthrough() {
+        let m = AppModel()
+        m.todayPnl = 330.0
+        m.todayRealized = -370.0
+        m.todayFloat = 700.0
+        m.todayPnlPartial = true
+        let k = m.portfolioKPIs
+        XCTAssertEqual(k.todayPnl, 330.0, accuracy: 0.001)
+        XCTAssertEqual(k.todayRealized, -370.0, accuracy: 0.001)
+        XCTAssertEqual(k.todayFloat, 700.0, accuracy: 0.001)
+        XCTAssertTrue(k.todayPnlPartial)
+    }
+
+    /// 染色走 Double 数值派生(pnlColor),非字符串判负——今日盈亏为负必须染红、为 0/正染绿。
+    func testTodayPnlColorDerivedFromValueNotString() {
+        XCTAssertEqual(Double(330.0).pnlColor, LN.up)
+        XCTAssertEqual(Double(-370.0).pnlColor, LN.down)
+        XCTAssertEqual(Double(0).pnlColor, LN.up)   // 0 视为非负 → 绿(与既有 pnlColor 契约一致)
+    }
 }
 
 // MARK: - APIError reason 映射

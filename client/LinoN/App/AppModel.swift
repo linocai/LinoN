@@ -68,6 +68,11 @@ struct PortfolioKPIs {
     var positionCount: Int = 0
     var disciplineRate: Int = 86   // 纪律执行率(占位 · 阶段3 复盘真值)
     var disciplineTrend: Int = 4
+    // v1.4.1 Phase B:今日盈亏(来自后端 GET /positions 聚合,不本地重算)。
+    var todayPnl: Double = 0
+    var todayRealized: Double = 0
+    var todayFloat: Double = 0
+    var todayPnlPartial: Bool = false
 }
 
 @MainActor
@@ -82,6 +87,12 @@ final class AppModel {
     var freeSlots: Int = 3
     var isLoading = false
     var loadError: String? = nil
+
+    // —— v1.4.1 Phase B:今日盈亏(GET /positions 顶层聚合字段,后端算好、客户端不重算)——
+    var todayPnl: Double = 0
+    var todayRealized: Double = 0
+    var todayFloat: Double = 0
+    var todayPnlPartial: Bool = false
 
     // —— 阶段2:候选(GET /candidates;v1.3.0 起后端固定返 Top CANDIDATE_LIMIT=20,不再满仓闭门)——
     var candidates: [Candidate] = []
@@ -196,6 +207,11 @@ final class AppModel {
             k.disciplineRate = r.disciplineRate
             k.disciplineTrend = r.rateTrend
         }
+        // v1.4.1 Phase B:今日盈亏取后端聚合值,不本地重算。
+        k.todayPnl = todayPnl
+        k.todayRealized = todayRealized
+        k.todayFloat = todayFloat
+        k.todayPnlPartial = todayPnlPartial
         return k
     }
 
@@ -233,9 +249,13 @@ final class AppModel {
         isLoading = true
         loadError = nil
         do {
-            let (positions, free) = try await client.fetchPositions()
-            self.holdings = positions
-            self.freeSlots = free
+            let r = try await client.fetchPositions()
+            self.holdings = r.holdings
+            self.freeSlots = r.freeSlots
+            self.todayPnl = r.todayPnl
+            self.todayRealized = r.todayRealized
+            self.todayFloat = r.todayFloat
+            self.todayPnlPartial = r.todayPnlPartial
         } catch let e as APIError {
             self.loadError = e.errorDescription
             if case .noToken = e {} else { showToast(e.errorDescription ?? "拉取失败", isError: true) }

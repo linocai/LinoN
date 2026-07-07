@@ -12,16 +12,35 @@ struct KPIHeroIOS: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("浮动盈亏").font(.system(size: 12)).foregroundStyle(LN.textSecondary)
-                .padding(.bottom, 4)
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(LNFmt.signedMoney(kpis.floatPnl))
-                    .font(LNFont.heroNumber)
-                    .foregroundStyle(kpis.floatPnl.pnlColor)
-                Text(LNFmt.signedPct(kpis.floatPnlPct))
-                    .font(.system(size: 16, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(kpis.floatPnl.pnlColor)
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("浮动盈亏").font(.system(size: 12)).foregroundStyle(LN.textSecondary)
+                        .padding(.bottom, 4)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(LNFmt.signedMoney(kpis.floatPnl))
+                            .font(LNFont.heroNumber)
+                            .foregroundStyle(kpis.floatPnl.pnlColor)
+                        Text(LNFmt.signedPct(kpis.floatPnlPct))
+                            .font(.system(size: 16, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(kpis.floatPnl.pnlColor)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("今日盈亏").font(.system(size: 12)).foregroundStyle(LN.textSecondary)
+                        .padding(.bottom, 4)
+                    Text(LNFmt.signedMoney(kpis.todayPnl))
+                        .font(.system(size: 22, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(kpis.todayPnl.pnlColor)
+                    if kpis.todayPnlPartial {
+                        Text("部分持仓缺今日行情数据")
+                            .font(.system(size: 10.5)).foregroundStyle(LN.textTertiary)
+                            .padding(.top, 2)
+                    }
+                }
             }
+            Text("浮动=持仓开仓以来 · 今日=今日已实现+今日浮动")
+                .font(.system(size: 10.5)).foregroundStyle(LN.textTertiary)
+                .padding(.top, 6)
             HStack(spacing: 10) {
                 miniStat("持仓市值", LNFmt.money(kpis.marketValue), nil)
                 miniStat("仓位", "\(kpis.positionCount)/3",
@@ -66,7 +85,13 @@ struct KPIStripMac: View {
         HStack(spacing: 12) {
             card("持仓市值", value: LNFmt.money(kpis.marketValue), valueColor: LN.textPrimary)
             card("浮动盈亏", value: LNFmt.signedMoney(kpis.floatPnl),
-                 note: LNFmt.signedPct(kpis.floatPnlPct), valueColor: kpis.floatPnl.pnlColor)
+                 note: LNFmt.signedPct(kpis.floatPnlPct), valueColor: kpis.floatPnl.pnlColor,
+                 caption: "持仓开仓以来")
+            // v1.4.1 Phase B:今日盈亏与浮动盈亏并排,各自标注口径。
+            card("今日盈亏", value: LNFmt.signedMoney(kpis.todayPnl),
+                 note: kpis.todayPnlPartial ? "部分持仓缺今日行情" : nil,
+                 noteColor: LN.textTertiary, valueColor: kpis.todayPnl.pnlColor,
+                 caption: "今日已实现+今日浮动")
             card("仓位", value: "\(kpis.positionCount)/3",
                  note: kpis.positionCount >= 3 ? "满仓" : "\(3 - kpis.positionCount) 可用",
                  noteColor: LN.amber, valueColor: LN.textPrimary)
@@ -76,7 +101,7 @@ struct KPIStripMac: View {
     }
 
     private func card(_ title: String, value: String, note: String? = nil,
-                      noteColor: Color = LN.up, valueColor: Color) -> some View {
+                      noteColor: Color = LN.up, valueColor: Color, caption: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.system(size: 11)).foregroundStyle(LN.textSecondary)
             HStack(alignment: .firstTextBaseline, spacing: 5) {
@@ -86,6 +111,9 @@ struct KPIStripMac: View {
                     Text(n).font(.system(size: 13, weight: .semibold).monospacedDigit())
                         .foregroundStyle(noteColor)
                 }
+            }
+            if let c = caption {
+                Text(c).font(.system(size: 9.5)).foregroundStyle(LN.textTertiary)
             }
         }
         .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))

@@ -3,7 +3,8 @@
 //  LinoN — 后端 REST 客户端(track A FastAPI on :8001)
 //
 //  端点契约见 PROJECT_PLAN §4 A.1/A.2/A.4 + backend/app/api/app.py:
-//    GET  /api/v1/positions                 → { holdings:[Position], free_slots }
+//    GET  /api/v1/positions                 → { holdings:[Position], free_slots,
+//                                                today_pnl/today_realized/today_float/today_pnl_partial }
 //    POST /api/v1/positions/open            → { ok, position_id, stop_line, take_line, buy_date }
 //                                             409 slots_full / duplicate_holding · 422 字段
 //    POST /api/v1/positions/{id}/close      → { ok, trade_id, pnl, kept_*, broke_rule }
@@ -338,9 +339,14 @@ struct AlertAckRequest: Encodable {
 struct EmptyBody: Encodable {}
 
 /// GET /positions 响应(对齐 backend PositionsList + Models.swift Position 形状)。
+/// v1.4.1 Phase B:新增 4 个今日盈亏可选字段(前向兼容,旧后端缺键 → decode 兜底默认值)。
 private struct PositionsListResponse: Decodable {
     let holdings: [PositionDTO]
     let free_slots: Int
+    let today_pnl: Double?
+    let today_realized: Double?
+    let today_float: Double?
+    let today_pnl_partial: Bool?
 }
 
 /// 后端返回的 Position 形状(snake_case);转 Models.swift Position。
@@ -371,7 +377,10 @@ actor APIClient {
     }
 
     // —— 拉持仓 ——
-    func fetchPositions() async throws -> (holdings: [Position], freeSlots: Int) {
+    // v1.4.1 Phase B:新增 4 个今日盈亏字段,可选 decode 缺省 0/false(兼容旧后端)。
+    func fetchPositions() async throws -> (holdings: [Position], freeSlots: Int,
+                                            todayPnl: Double, todayRealized: Double,
+                                            todayFloat: Double, todayPnlPartial: Bool) {
         let data = try await get("/api/v1/positions")
         let resp = try JSONDecoder().decode(PositionsListResponse.self, from: data)
         let cal = StaticTradingCalendar.shared
@@ -388,7 +397,9 @@ actor APIClient {
             p.flow3d = dto.flow3d
             return p
         }
-        return (positions, resp.free_slots)
+        return (positions, resp.free_slots,
+                resp.today_pnl ?? 0, resp.today_realized ?? 0,
+                resp.today_float ?? 0, resp.today_pnl_partial ?? false)
     }
 
     // —— 开仓 ——
